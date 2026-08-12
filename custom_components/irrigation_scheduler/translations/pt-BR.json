@@ -1,0 +1,138 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Zona de irrigação",
+        "description": "Configure uma zona de irrigação. Cada entrada de configuração representa uma zona.",
+        "data": {
+          "name": "Nome da zona",
+          "target_entity_id": "Entidade alvo",
+          "default_duration": "Duração padrão (minutos)"
+        }
+      }
+    },
+    "error": {
+      "default_duration_too_high": "A duração padrão não pode exceder a duração máxima."
+    },
+    "abort": {
+      "already_configured": "Esta entidade alvo já está configurada como zona de irrigação."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opções da zona de irrigação",
+        "description": "Ajuste as durações de irrigação desta zona.",
+        "data": {
+          "default_duration": "Duração padrão (minutos)",
+          "max_duration": "Duração máxima (minutos)"
+        }
+      }
+    },
+    "error": {
+      "default_duration_too_high": "A duração padrão não pode exceder a duração máxima."
+    }
+  },
+  "entity": {
+    "switch": {
+      "schedule_enabled": {
+        "name": "Agendamento ativado"
+      }
+    },
+    "sensor": {
+      "next_run": {
+        "name": "Próxima execução"
+      }
+    },
+    "binary_sensor": {
+      "watering": {
+        "name": "Irrigando"
+      }
+    }
+  },
+  "services": {
+    "water_now": {
+      "name": "Irrigar agora",
+      "description": "Inicie a irrigação imediatamente por uma determinada duração. Se nenhuma duração for informada, a duração padrão da zona é usada.",
+      "fields": {
+        "duration": {
+          "name": "Duração",
+          "description": "Duração em segundos (limitada à duração máxima da zona)."
+        }
+      }
+    },
+    "stop": {
+      "name": "Parar",
+      "description": "Pare a irrigação imediatamente e desligue a entidade alvo.",
+      "fields": {}
+    },
+    "add_schedule": {
+      "name": "Adicionar agendamento",
+      "description": "Adicione um novo agendamento de irrigação à zona.",
+      "fields": {
+        "time": {
+          "name": "Horário",
+          "description": "Horário do dia para iniciar a irrigação."
+        },
+        "days": {
+          "name": "Dias",
+          "description": "Dias da semana em que o agendamento é executado (0 = segunda, 6 = domingo)."
+        },
+        "duration": {
+          "name": "Duração",
+          "description": "Duração da irrigação em segundos."
+        },
+        "enabled": {
+          "name": "Ativado",
+          "description": "Se o agendamento inicia ativado."
+        }
+      }
+    },
+    "update_schedule": {
+      "name": "Atualizar agendamento",
+      "description": "Atualize um agendamento de irrigação existente.",
+      "fields": {
+        "id": {
+          "name": "ID do agendamento",
+          "description": "ID do agendamento a ser atualizado."
+        },
+        "time": {
+          "name": "Horário",
+          "description": "Novo horário do dia para iniciar a irrigação."
+        },
+        "days": {
+          "name": "Dias",
+          "description": "Novos dias da semana (0 = segunda, 6 = domingo)."
+        },
+        "duration": {
+          "name": "Duração",
+          "description": "Nova duração da irrigação em segundos."
+        },
+        "enabled": {
+          "name": "Ativado",
+          "description": "Se o agendamento está ativado."
+        }
+      }
+    },
+    "remove_schedule": {
+      "name": "Remover agendamento",
+      "description": "Remova um agendamento de irrigação.",
+      "fields": {
+        "id": {
+          "name": "ID do agendamento",
+          "description": "ID do agendamento a ser removido."
+        }
+      }
+    },
+    "set_schedules": {
+      "name": "Definir agendamentos",
+      "description": "Substitua todos os agendamentos da zona por uma nova lista.",
+      "fields": {
+        "schedules": {
+          "name": "Agendamentos",
+          "description": "Lista completa de agendamentos a serem definidos."
+        }
+      }
+    }
+  }
+}

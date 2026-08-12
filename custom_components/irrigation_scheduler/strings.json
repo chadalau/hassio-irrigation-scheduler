@@ -1,0 +1,138 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Irrigation zone",
+        "description": "Set up an irrigation zone. Each configuration entry represents one zone.",
+        "data": {
+          "name": "Zone name",
+          "target_entity_id": "Target entity",
+          "default_duration": "Default duration (minutes)"
+        }
+      }
+    },
+    "error": {
+      "default_duration_too_high": "Default duration must not exceed the max duration."
+    },
+    "abort": {
+      "already_configured": "This target entity is already configured as an irrigation zone."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Irrigation zone options",
+        "description": "Adjust the watering durations for this zone.",
+        "data": {
+          "default_duration": "Default duration (minutes)",
+          "max_duration": "Max duration (minutes)"
+        }
+      }
+    },
+    "error": {
+      "default_duration_too_high": "Default duration must not exceed the max duration."
+    }
+  },
+  "entity": {
+    "switch": {
+      "schedule_enabled": {
+        "name": "Schedule enabled"
+      }
+    },
+    "sensor": {
+      "next_run": {
+        "name": "Next run"
+      }
+    },
+    "binary_sensor": {
+      "watering": {
+        "name": "Watering"
+      }
+    }
+  },
+  "services": {
+    "water_now": {
+      "name": "Water now",
+      "description": "Start watering immediately for a given duration. If no duration is given, the zone default duration is used.",
+      "fields": {
+        "duration": {
+          "name": "Duration",
+          "description": "Duration in seconds (clamped to the zone max duration)."
+        }
+      }
+    },
+    "stop": {
+      "name": "Stop",
+      "description": "Stop watering immediately and turn the target entity off.",
+      "fields": {}
+    },
+    "add_schedule": {
+      "name": "Add schedule",
+      "description": "Add a new irrigation schedule to the zone.",
+      "fields": {
+        "time": {
+          "name": "Time",
+          "description": "Time of day to start watering."
+        },
+        "days": {
+          "name": "Days",
+          "description": "Days of the week when the schedule runs (0 = Monday, 6 = Sunday)."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "Watering duration in seconds."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Whether the schedule starts enabled."
+        }
+      }
+    },
+    "update_schedule": {
+      "name": "Update schedule",
+      "description": "Update an existing irrigation schedule.",
+      "fields": {
+        "id": {
+          "name": "Schedule ID",
+          "description": "ID of the schedule to update."
+        },
+        "time": {
+          "name": "Time",
+          "description": "New time of day to start watering."
+        },
+        "days": {
+          "name": "Days",
+          "description": "New days of the week (0 = Monday, 6 = Sunday)."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "New watering duration in seconds."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Whether the schedule is enabled."
+        }
+      }
+    },
+    "remove_schedule": {
+      "name": "Remove schedule",
+      "description": "Remove an irrigation schedule.",
+      "fields": {
+        "id": {
+          "name": "Schedule ID",
+          "description": "ID of the schedule to remove."
+        }
+      }
+    },
+    "set_schedules": {
+      "name": "Set schedules",
+      "description": "Replace all schedules of the zone with a new list.",
+      "fields": {
+        "schedules": {
+          "name": "Schedules",
+          "description": "Full list of schedules to set."
+        }
+      }
+    }
+  }
+}

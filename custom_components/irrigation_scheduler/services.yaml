@@ -1,0 +1,157 @@
+water_now:
+  name: Water now
+  description: Start watering immediately for a given duration. If no duration is given, the zone default duration is used.
+  target:
+    entity:
+      integration: irrigation_scheduler
+  fields:
+    duration:
+      name: Duration
+      description: Duration in seconds (clamped to the zone max duration).
+      selector:
+        number:
+          min: 1
+          max: 86400
+          unit_of_measurement: s
+          mode: box
+
+stop:
+  name: Stop
+  description: Stop watering immediately and turn the target entity off.
+  target:
+    entity:
+      integration: irrigation_scheduler
+
+add_schedule:
+  name: Add schedule
+  description: Add a new irrigation schedule to the zone.
+  target:
+    entity:
+      integration: irrigation_scheduler
+  fields:
+    time:
+      name: Time
+      description: Time of day to start watering.
+      required: true
+      selector:
+        time:
+    days:
+      name: Days
+      description: Days of the week when the schedule runs (0 = Monday, 6 = Sunday).
+      required: true
+      selector:
+        select:
+          multiple: true
+          options:
+            - label: Monday
+              value: "0"
+            - label: Tuesday
+              value: "1"
+            - label: Wednesday
+              value: "2"
+            - label: Thursday
+              value: "3"
+            - label: Friday
+              value: "4"
+            - label: Saturday
+              value: "5"
+            - label: Sunday
+              value: "6"
+    duration:
+      name: Duration
+      description: Watering duration in seconds.
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 86400
+          unit_of_measurement: s
+          mode: box
+    enabled:
+      name: Enabled
+      description: Whether the schedule starts enabled.
+      default: true
+      selector:
+        boolean:
+
+update_schedule:
+  name: Update schedule
+  description: Update an existing irrigation schedule.
+  target:
+    entity:
+      integration: irrigation_scheduler
+  fields:
+    id:
+      name: Schedule ID
+      description: ID of the schedule to update.
+      required: true
+      selector:
+        text:
+    time:
+      name: Time
+      description: New time of day to start watering.
+      selector:
+        time:
+    days:
+      name: Days
+      description: New days of the week (0 = Monday, 6 = Sunday).
+      selector:
+        select:
+          multiple: true
+          options:
+            - label: Monday
+              value: "0"
+            - label: Tuesday
+              value: "1"
+            - label: Wednesday
+              value: "2"
+            - label: Thursday
+              value: "3"
+            - label: Friday
+              value: "4"
+            - label: Saturday
+              value: "5"
+            - label: Sunday
+              value: "6"
+    duration:
+      name: Duration
+      description: New watering duration in seconds.
+      selector:
+        number:
+          min: 1
+          max: 86400
+          unit_of_measurement: s
+          mode: box
+    enabled:
+      name: Enabled
+      description: Whether the schedule is enabled.
+      selector:
+        boolean:
+
+remove_schedule:
+  name: Remove schedule
+  description: Remove an irrigation schedule.
+  target:
+    entity:
+      integration: irrigation_scheduler
+  fields:
+    id:
+      name: Schedule ID
+      description: ID of the schedule to remove.
+      required: true
+      selector:
+        text:
+
+set_schedules:
+  name: Set schedules
+  description: Replace all schedules of the zone with a new list.
+  target:
+    entity:
+      integration: irrigation_scheduler
+  fields:
+    schedules:
+      name: Schedules
+      description: Full list of schedules to set.
+      required: true
+      selector:
+        object:
