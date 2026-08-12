@@ -339,53 +339,71 @@ export class IrrigationScheduleCard extends LitElement {
   }
 
   private _renderDialog(labels: string[]): TemplateResult {
+    if (!this._dialogOpen) {
+      return html``;
+    }
     return html`
-      <ha-dialog
-        ?open=${this._dialogOpen}
-        .heading=${this._editingId ? "Editar horário" : "Adicionar horário"}
-        @closed=${this._closeDialog}
-      >
-        <div class="dialog-body">
-          <ha-time-input
-            label="Horário"
-            .value=${this._formTime}
-            @value-changed=${this._onTimeChanged}
-          ></ha-time-input>
-          <div class="day-picker">
-            ${labels.map(
-              (label, day) => html`
-                <label class="day-option">
-                  <ha-checkbox
-                    ?checked=${this._formDays.includes(day)}
-                    @change=${(ev: Event) => this._toggleDay(day, ev)}
-                  ></ha-checkbox>
-                  <span>${label}</span>
-                </label>
-              `,
-            )}
+      <div class="overlay" @click=${this._closeDialog}>
+        <div
+          class="dialog"
+          role="dialog"
+          aria-modal="true"
+          @click=${(ev: Event) => ev.stopPropagation()}
+        >
+          <div class="dialog-header">
+            ${this._editingId ? "Editar horário" : "Adicionar horário"}
           </div>
-          <ha-textfield
-            label="Duração (minutos)"
-            type="number"
-            min="1"
-            .value=${String(this._formDuration)}
-            @change=${this._onDurationChange}
-          ></ha-textfield>
-          ${this._formError
-            ? html`
-                <div class="form-error">
-                  Informe um horário, ao menos um dia e uma duração válida.
-                </div>
-              `
-            : ""}
+          <div class="dialog-body">
+            <div class="field">
+              <label>Horário</label>
+              <input
+                type="time"
+                .value=${this._formTime}
+                @change=${this._onTimeChanged}
+              />
+            </div>
+            <div class="field">
+              <label>Dias da semana</label>
+              <div class="day-picker">
+                ${labels.map(
+                  (label, day) => html`
+                    <label class="day-option">
+                      <input
+                        type="checkbox"
+                        ?checked=${this._formDays.includes(day)}
+                        @change=${(ev: Event) => this._toggleDay(day, ev)}
+                      />
+                      <span>${label}</span>
+                    </label>
+                  `,
+                )}
+              </div>
+            </div>
+            <div class="field">
+              <label>Duração (minutos)</label>
+              <input
+                type="number"
+                min="1"
+                .value=${String(this._formDuration)}
+                @change=${this._onDurationChange}
+              />
+            </div>
+            ${this._formError
+              ? html`
+                  <div class="form-error">
+                    Informe um horário, ao menos um dia e uma duração válida.
+                  </div>
+                `
+              : ""}
+          </div>
+          <div class="dialog-actions">
+            <button class="dialog-cancel" @click=${this._closeDialog}>
+              Cancelar
+            </button>
+            <button class="dialog-save" @click=${this._saveDialog}>Salvar</button>
+          </div>
         </div>
-        <ha-button slot="secondaryAction" @click=${this._closeDialog}>
-          Cancelar
-        </ha-button>
-        <ha-button slot="primaryAction" @click=${this._saveDialog}>
-          Salvar
-        </ha-button>
-      </ha-dialog>
+      </div>
     `;
   }
 
@@ -559,9 +577,8 @@ export class IrrigationScheduleCard extends LitElement {
     this._closeDialog();
   }
 
-  private _onTimeChanged(ev: CustomEvent): void {
-    const detail = ev.detail as { value?: unknown } | undefined;
-    const value = detail?.value;
+  private _onTimeChanged(ev: Event): void {
+    const value = (ev.target as HTMLInputElement).value;
     if (typeof value === "string") {
       this._formTime = value;
       this._formError = false;

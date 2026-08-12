@@ -185,12 +185,60 @@ export const cardStyles = css`
     font-size: 0.9rem;
   }
 
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .dialog {
+    width: min(90vw, 380px);
+    background: var(--card-background-color, var(--primary-background-color, #fff));
+    color: var(--primary-text-color);
+    border-radius: 8px;
+    padding: 16px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  }
+
+  .dialog-header {
+    font-size: 1rem;
+    font-weight: 500;
+    margin-bottom: 12px;
+  }
+
   .dialog-body {
     display: flex;
     flex-direction: column;
     gap: 16px;
-    padding: 8px 0;
-    min-width: 280px;
+    min-width: 0;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .field label {
+    font-size: 0.8rem;
+    color: var(--secondary-text-color);
+  }
+
+  .field input[type="time"],
+  .field input[type="number"] {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    font-size: 1rem;
+    color: var(--primary-text-color);
+    background: var(--input-fill-color, rgba(0, 0, 0, 0.05));
+    border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+    border-radius: 6px;
+    color-scheme: dark;
   }
 
   .day-picker {
@@ -208,6 +256,39 @@ export const cardStyles = css`
     font-size: 0.7rem;
     color: var(--secondary-text-color);
     cursor: pointer;
+  }
+
+  .day-option input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--primary-color, #03a9f4);
+    cursor: pointer;
+  }
+
+  .dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  .dialog-actions button {
+    padding: 8px 16px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .dialog-cancel {
+    background: transparent;
+    color: var(--primary-text-color);
+  }
+
+  .dialog-save {
+    background: var(--primary-color, #03a9f4);
+    color: var(--text-primary-color, #fff);
   }
 
   .form-error {
