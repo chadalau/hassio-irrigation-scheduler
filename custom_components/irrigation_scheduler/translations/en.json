@@ -8,18 +8,24 @@
           "name": "Zone name",
           "target_entity_id": "Target entity",
           "default_duration": "Default duration (minutes)",
-          "flow_rate_lph": "Flow rate (L/h)",
+          "flow_rate_lph": "Flow rate per pot (L/h)",
           "number_of_pots": "Number of pots (optional)",
           "reservoir_volume_l": "Reservoir volume (L, optional)",
           "ph_entity_id": "pH sensor (optional)",
+          "ec_entity_id": "EC sensor (optional, display only)",
           "ph_min": "Minimum pH to water",
-          "ph_max": "Maximum pH to water"
+          "ph_max": "Maximum pH to water",
+          "ph_entity_id_2": "R2 pH sensor (optional, second reservoir)",
+          "ec_entity_id_2": "R2 EC sensor (optional, display only)",
+          "ph_min_2": "R2 minimum pH to water",
+          "ph_max_2": "R2 maximum pH to water"
         }
       }
     },
     "error": {
       "default_duration_too_high": "Default duration must not exceed the max duration.",
-      "ph_min_too_high": "Minimum pH must not be greater than maximum pH."
+      "ph_min_too_high": "Minimum pH must not be greater than maximum pH.",
+      "ph_min_too_high_2": "R2 minimum pH must not be greater than R2 maximum pH."
     },
     "abort": {
       "already_configured": "This target entity is already configured as an irrigation zone."
@@ -33,18 +39,24 @@
         "data": {
           "default_duration": "Default duration (minutes)",
           "max_duration": "Max duration (minutes)",
-          "flow_rate_lph": "Flow rate (L/h)",
+          "flow_rate_lph": "Flow rate per pot (L/h)",
           "number_of_pots": "Number of pots (optional)",
           "reservoir_volume_l": "Reservoir volume (L, optional)",
           "ph_entity_id": "pH sensor (optional)",
+          "ec_entity_id": "EC sensor (optional, display only)",
           "ph_min": "Minimum pH to water",
-          "ph_max": "Maximum pH to water"
+          "ph_max": "Maximum pH to water",
+          "ph_entity_id_2": "R2 pH sensor (optional, second reservoir)",
+          "ec_entity_id_2": "R2 EC sensor (optional, display only)",
+          "ph_min_2": "R2 minimum pH to water",
+          "ph_max_2": "R2 maximum pH to water"
         }
       }
     },
     "error": {
       "default_duration_too_high": "Default duration must not exceed the max duration.",
-      "ph_min_too_high": "Minimum pH must not be greater than maximum pH."
+      "ph_min_too_high": "Minimum pH must not be greater than maximum pH.",
+      "ph_min_too_high_2": "R2 minimum pH must not be greater than R2 maximum pH."
     }
   },
   "entity": {
@@ -78,6 +90,11 @@
     "stop": {
       "name": "Stop",
       "description": "Stop watering immediately and turn the target entity off.",
+      "fields": {}
+    },
+    "refill_reservoir": {
+      "name": "Refill reservoir",
+      "description": "Reset the tracked remaining reservoir volume back to full capacity (reservoir_volume_l).",
       "fields": {}
     },
     "add_schedule": {
@@ -150,11 +167,15 @@
     },
     "set_zone_options": {
       "name": "Set zone options",
-      "description": "Update optional zone settings (flow rate, number of pots, reservoir volume and the pH gate).",
+      "description": "Update optional zone settings (default duration, flow rate, number of pots, reservoir volume and the pH gate for up to two independent reservoirs).",
       "fields": {
+        "default_duration": {
+          "name": "Default duration",
+          "description": "Default watering duration in seconds, used by water_now when no duration is given. Must not exceed the zone's max_duration."
+        },
         "flow_rate_lph": {
-          "name": "Flow rate",
-          "description": "Watering flow rate in liters per hour."
+          "name": "Flow rate per pot",
+          "description": "Watering flow rate PER POT, in liters per hour (multiplied by number_of_pots for the total volume shown on the card)."
         },
         "number_of_pots": {
           "name": "Number of pots",
@@ -175,6 +196,26 @@
         "ph_max": {
           "name": "Maximum pH",
           "description": "Maximum pH (0-14) that allows a scheduled run to start."
+        },
+        "ec_entity_id": {
+          "name": "EC sensor",
+          "description": "Entity id of an EC (conductivity) sensor. Display-only: it never gates a run, it only feeds the card's EC badge. Send an empty string to clear it."
+        },
+        "ph_entity_id_2": {
+          "name": "R2 pH sensor",
+          "description": "Entity id of a pH sensor for a SECOND, independent reservoir (e.g. one pump/outlet feeding two tanks). When set, SCHEDULED runs only start while BOTH reservoirs read within their own range. Send an empty string to disable."
+        },
+        "ph_min_2": {
+          "name": "R2 minimum pH",
+          "description": "Minimum pH (0-14) for the second reservoir."
+        },
+        "ph_max_2": {
+          "name": "R2 maximum pH",
+          "description": "Maximum pH (0-14) for the second reservoir."
+        },
+        "ec_entity_id_2": {
+          "name": "R2 EC sensor",
+          "description": "Entity id of an EC sensor for the second reservoir. Display-only. Send an empty string to clear it."
         }
       }
     }

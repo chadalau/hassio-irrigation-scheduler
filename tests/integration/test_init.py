@@ -20,8 +20,10 @@ from custom_components.irrigation_scheduler.const import (
     DEFAULT_MAX_DURATION,
     DOMAIN,
     SERVICE_ADD_SCHEDULE,
+    SERVICE_REFILL_RESERVOIR,
     SERVICE_REMOVE_SCHEDULE,
     SERVICE_SET_SCHEDULES,
+    SERVICE_SET_ZONE_OPTIONS,
     SERVICE_STOP,
     SERVICE_UPDATE_SCHEDULE,
     SERVICE_WATER_NOW,
@@ -36,6 +38,8 @@ ALL_SERVICES = (
     SERVICE_UPDATE_SCHEDULE,
     SERVICE_REMOVE_SCHEDULE,
     SERVICE_SET_SCHEDULES,
+    SERVICE_SET_ZONE_OPTIONS,
+    SERVICE_REFILL_RESERVOIR,
 )
 
 
@@ -236,6 +240,47 @@ async def test_corrupt_duration_options_fall_back_to_defaults(
     assert scheduler.started_at is not None
     assert scheduler.finishes_at is not None
     assert (scheduler.finishes_at - scheduler.started_at).total_seconds() == 600
+
+
+async def test_corrupt_schedule_duration_is_filtered_and_does_not_kill_scheduling(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """REGRESSION (M1): a schedule with a non-numeric/out-of-range duration is
+    filtered out of ``schedules`` instead of reaching the bare
+    ``int(schedule[CONF_SCHEDULE_DURATION]))`` cast in
+    ``_async_schedule_fired`` -- that used to raise BEFORE
+    ``_reschedule_next()`` ran (the timer is one-shot), silently stopping the
+    zone from ever scheduling again until restart or an options change.
+    """
+    corrupt_schedule = {
+        "id": "bad",
+        "time": "05:00:00",
+        "days": [0, 1, 2, 3, 4, 5, 6],
+        "duration": "not-a-number",
+        "enabled": True,
+    }
+    valid_schedule = {
+        "id": "good",
+        "time": "07:00:00",
+        "days": [0, 1, 2, 3, 4, 5, 6],
+        "duration": 300,
+        "enabled": True,
+    }
+    entry = await setup_zone(
+        target_entity_id="switch.zone1",
+        name="Garden",
+        options={
+            CONF_ENABLED: True,
+            CONF_DEFAULT_DURATION: 600,
+            CONF_MAX_DURATION: 7200,
+            CONF_SCHEDULES: [corrupt_schedule, valid_schedule],
+        },
+    )
+    scheduler = scheduler_of(entry)
+    # The corrupt schedule never even reaches `schedules` / next_run: it is
+    # filtered exactly like a non-dict item already was.
+    assert scheduler.schedules == [valid_schedule]
+    assert scheduler.next_run is not None
 
 
 @pytest.mark.parametrize(

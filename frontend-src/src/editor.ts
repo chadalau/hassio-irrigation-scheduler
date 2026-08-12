@@ -1,5 +1,5 @@
 import { LitElement, html, TemplateResult } from "lit";
-import { property } from "lit/decorators.js";
+import { property, state } from "lit/decorators.js";
 
 import type { CardConfig, HomeAssistant } from "./types";
 
@@ -28,17 +28,28 @@ export class IrrigationScheduleCardEditor extends LitElement {
   @property({ attribute: false })
   public hass?: HomeAssistant;
 
-  @property({ attribute: false })
-  public config?: CardConfig;
+  @state()
+  private _config?: CardConfig;
+
+  /**
+   * Required by the Lovelace card-editor contract: the dashboard host calls
+   * this to hand over the config (it does NOT set a `.config` property
+   * directly). Without it the host's own `this._configElement.setConfig(...)`
+   * call throws "setConfig is not a function" and the visual editor never
+   * loads (YAML-only fallback).
+   */
+  setConfig(config: CardConfig): void {
+    this._config = config;
+  }
 
   protected render(): TemplateResult {
-    if (!this.hass || !this.config) {
+    if (!this.hass || !this._config) {
       return html``;
     }
     return html`
       <ha-form
         .hass=${this.hass}
-        .data=${this.config}
+        .data=${this._config}
         .schema=${SCHEMA}
         .computeLabel=${this._computeLabel}
         @value-changed=${this._valueChanged}
@@ -52,10 +63,10 @@ export class IrrigationScheduleCardEditor extends LitElement {
   private _valueChanged(ev: CustomEvent): void {
     const detail = ev.detail as { name?: string; value?: unknown } | undefined;
     const name = detail?.name;
-    if (!name || !this.config) {
+    if (!name || !this._config) {
       return;
     }
-    const config = { ...this.config, [name]: detail.value } as CardConfig;
+    const config = { ...this._config, [name]: detail.value } as CardConfig;
     this.dispatchEvent(
       new CustomEvent("config-changed", {
         detail: { config },

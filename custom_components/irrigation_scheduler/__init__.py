@@ -32,17 +32,23 @@ from homeassistant.helpers.typing import ConfigType
 from .const import (
     CARD_JS_FILENAME,
     CARD_JS_URL,
+    CONF_DEFAULT_DURATION,
     CONF_ENABLED,
     CONF_SCHEDULE_DAYS,
     CONF_SCHEDULE_DURATION,
     CONF_SCHEDULE_ID,
     CONF_SCHEDULE_TIME,
     CONF_SCHEDULES,
+    CONF_EC_ENTITY_ID,
+    CONF_EC_ENTITY_ID_2,
     CONF_FLOW_RATE_LPH,
     CONF_NUMBER_OF_POTS,
     CONF_PH_ENTITY_ID,
+    CONF_PH_ENTITY_ID_2,
     CONF_PH_MAX,
+    CONF_PH_MAX_2,
     CONF_PH_MIN,
+    CONF_PH_MIN_2,
     CONF_RESERVOIR_VOLUME_L,
     DOMAIN,
     MAX_SCHEDULE_DURATION,
@@ -51,6 +57,7 @@ from .const import (
     PH_SCALE_MIN,
     PLATFORMS,
     SERVICE_ADD_SCHEDULE,
+    SERVICE_REFILL_RESERVOIR,
     SERVICE_REMOVE_SCHEDULE,
     SERVICE_SET_SCHEDULES,
     SERVICE_SET_ZONE_OPTIONS,
@@ -97,6 +104,7 @@ WATER_NOW_SCHEMA = vol.Schema(
 )
 
 STOP_SCHEMA = vol.Schema({})
+REFILL_RESERVOIR_SCHEMA = vol.Schema({})
 
 UPDATE_SCHEDULE_SCHEMA = vol.Schema(
     {
@@ -120,45 +128,48 @@ REMOVE_SCHEDULE_SCHEMA = vol.Schema(
     {vol.Required(CONF_SCHEDULE_ID): cv.string}
 )
 
-def _validate_ph_range(data: dict[str, Any]) -> dict[str, Any]:
-    """Reject a call that sets ph_min above ph_max in the SAME call.
-
-    Does not (cannot, statelessly) check against a bound left unchanged from
-    a previous call; the card always sends both together, so this covers the
-    only case that matters in practice.
-    """
-    ph_min = data.get(CONF_PH_MIN)
-    ph_max = data.get(CONF_PH_MAX)
-    if ph_min is not None and ph_max is not None and ph_min > ph_max:
-        raise vol.Invalid("ph_min must not be greater than ph_max")
-    return data
-
-
-SET_ZONE_OPTIONS_SCHEMA = vol.All(
-    vol.Schema(
-        {
-            vol.Optional(CONF_FLOW_RATE_LPH): vol.All(
-                vol.Coerce(int), vol.Range(min=0, max=100000)
-            ),
-            vol.Optional(CONF_NUMBER_OF_POTS): vol.All(
-                vol.Coerce(int), vol.Range(min=0, max=100000)
-            ),
-            vol.Optional(CONF_RESERVOIR_VOLUME_L): vol.All(
-                vol.Coerce(int), vol.Range(min=0, max=100000)
-            ),
-            # Empty string is a valid, meaningful value: it explicitly
-            # disables the pH gate (see async_set_zone_options).
-            vol.Optional(CONF_PH_ENTITY_ID): cv.string,
-            vol.Optional(CONF_PH_MIN): vol.All(
-                vol.Coerce(float), vol.Range(min=PH_SCALE_MIN, max=PH_SCALE_MAX)
-            ),
-            vol.Optional(CONF_PH_MAX): vol.All(
-                vol.Coerce(float), vol.Range(min=PH_SCALE_MIN, max=PH_SCALE_MAX)
-            ),
-        }
-    ),
-    _validate_ph_range,
+SET_ZONE_OPTIONS_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_DEFAULT_DURATION): vol.All(
+            vol.Coerce(int), vol.Range(min=MIN_DURATION, max=MAX_SCHEDULE_DURATION)
+        ),
+        vol.Optional(CONF_FLOW_RATE_LPH): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=100000)
+        ),
+        vol.Optional(CONF_NUMBER_OF_POTS): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=100000)
+        ),
+        vol.Optional(CONF_RESERVOIR_VOLUME_L): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=100000)
+        ),
+        # Empty string is a valid, meaningful value: it explicitly disables
+        # the pH gate (see async_set_zone_options).
+        vol.Optional(CONF_PH_ENTITY_ID): cv.string,
+        vol.Optional(CONF_PH_MIN): vol.All(
+            vol.Coerce(float), vol.Range(min=PH_SCALE_MIN, max=PH_SCALE_MAX)
+        ),
+        vol.Optional(CONF_PH_MAX): vol.All(
+            vol.Coerce(float), vol.Range(min=PH_SCALE_MIN, max=PH_SCALE_MAX)
+        ),
+        # EC is display-only (never gates a run); same empty-string-clears
+        # semantics as ph_entity_id.
+        vol.Optional(CONF_EC_ENTITY_ID): cv.string,
+        # Second reservoir (R2): independent of the fields above -- see
+        # IrrigationScheduler._check_ph_gate.
+        vol.Optional(CONF_PH_ENTITY_ID_2): cv.string,
+        vol.Optional(CONF_PH_MIN_2): vol.All(
+            vol.Coerce(float), vol.Range(min=PH_SCALE_MIN, max=PH_SCALE_MAX)
+        ),
+        vol.Optional(CONF_PH_MAX_2): vol.All(
+            vol.Coerce(float), vol.Range(min=PH_SCALE_MIN, max=PH_SCALE_MAX)
+        ),
+        vol.Optional(CONF_EC_ENTITY_ID_2): cv.string,
+    }
 )
+# ph_min <= ph_max is validated in IrrigationScheduler.async_set_zone_options
+# against the EFFECTIVE range (this patch merged onto the stored options),
+# not just the two fields present in a single call -- a schema-only check
+# here could not see a bound left unchanged from a previous call.
 
 # Keys Home Assistant injects into a targeted service call. They are target
 # selectors (or frontend bookkeeping), not service data, and must be stripped
@@ -337,6 +348,12 @@ async def _async_register_services(hass: HomeAssistant) -> None:
             await scheduler.async_stop()
         return None
 
+    async def _async_refill_reservoir(call: ServiceCall) -> ServiceResponse:
+        REFILL_RESERVOIR_SCHEMA(_service_data(call))
+        for scheduler in await _async_resolve_schedulers(hass, call):
+            await scheduler.async_refill_reservoir()
+        return None
+
     async def _async_add_schedule(call: ServiceCall) -> ServiceResponse:
         data = _prepare_schedule_data(_service_data(call))
         # Id is generated ONLY on creation (new_schedule), never on update.
@@ -363,6 +380,10 @@ async def _async_register_services(hass: HomeAssistant) -> None:
 
     async def _async_set_schedules(call: ServiceCall) -> ServiceResponse:
         data = _prepare_schedule_data(_service_data(call))
+        if CONF_SCHEDULES not in data:
+            raise ServiceValidationError(
+                f"Missing required field '{CONF_SCHEDULES}'"
+            )
         raw_schedules = cv.ensure_list(data[CONF_SCHEDULES])
         schedules: list[dict[str, Any]] = []
         for index, item in enumerate(raw_schedules):
@@ -376,6 +397,17 @@ async def _async_register_services(hass: HomeAssistant) -> None:
             schedules.append(
                 new_schedule(SCHEDULE_SCHEMA(_prepare_schedule_data(item)))
             )
+        # async_add_schedule already avoids id collisions on single inserts;
+        # a full-list replace must reject them outright rather than silently
+        # letting update_schedule/remove_schedule target an ambiguous id.
+        seen_ids: set[str] = set()
+        for index, schedule in enumerate(schedules):
+            schedule_id = schedule[CONF_SCHEDULE_ID]
+            if schedule_id in seen_ids:
+                raise ServiceValidationError(
+                    f"Duplicate schedule id {schedule_id!r} at index {index}"
+                )
+            seen_ids.add(schedule_id)
         for scheduler in await _async_resolve_schedulers(hass, call):
             await scheduler.async_set_schedules(schedules)
         return None
@@ -384,12 +416,18 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         data = SET_ZONE_OPTIONS_SCHEMA(_service_data(call))
         for scheduler in await _async_resolve_schedulers(hass, call):
             await scheduler.async_set_zone_options(
+                default_duration=data.get(CONF_DEFAULT_DURATION),
                 flow_rate_lph=data.get(CONF_FLOW_RATE_LPH),
                 number_of_pots=data.get(CONF_NUMBER_OF_POTS),
                 reservoir_volume_l=data.get(CONF_RESERVOIR_VOLUME_L),
                 ph_entity_id=data.get(CONF_PH_ENTITY_ID),
                 ph_min=data.get(CONF_PH_MIN),
                 ph_max=data.get(CONF_PH_MAX),
+                ec_entity_id=data.get(CONF_EC_ENTITY_ID),
+                ph_entity_id_2=data.get(CONF_PH_ENTITY_ID_2),
+                ph_min_2=data.get(CONF_PH_MIN_2),
+                ph_max_2=data.get(CONF_PH_MAX_2),
+                ec_entity_id_2=data.get(CONF_EC_ENTITY_ID_2),
             )
         return None
 
@@ -401,6 +439,7 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         (SERVICE_REMOVE_SCHEDULE, _async_remove_schedule),
         (SERVICE_SET_SCHEDULES, _async_set_schedules),
         (SERVICE_SET_ZONE_OPTIONS, _async_set_zone_options),
+        (SERVICE_REFILL_RESERVOIR, _async_refill_reservoir),
     ):
         hass.services.async_register(DOMAIN, service, handler, schema=None)
 
@@ -415,6 +454,7 @@ def _async_unregister_services(hass: HomeAssistant) -> None:
         SERVICE_REMOVE_SCHEDULE,
         SERVICE_SET_SCHEDULES,
         SERVICE_SET_ZONE_OPTIONS,
+        SERVICE_REFILL_RESERVOIR,
     ):
         if hass.services.has_service(DOMAIN, service):
             hass.services.async_remove(DOMAIN, service)

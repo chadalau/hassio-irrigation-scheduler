@@ -157,6 +157,85 @@ async def test_future_run_is_resumed_and_turns_off_at_finishes_at(
     assert (await store.async_load())["entries"] == {}
 
 
+async def test_corrupt_duration_in_store_does_not_abort_setup(
+    hass: HomeAssistant, hass_storage, mock_homeassistant_services
+) -> None:
+    """REGRESSION (A1): a corrupted ``duration`` in the runtime store must not
+    crash ``async_setup_entry`` for the whole zone. The stop timer is armed
+    against the already-validated ``finishes_at`` directly, never against
+    ``duration`` -- a bad value only degrades the informational
+    ``active_duration``, computed defensively instead of via a bare
+    ``int(...)`` cast that used to raise ``ValueError``.
+    """
+    entry_id = "recovery_corrupt_duration"
+    finishes_at = dt_util.utcnow() + timedelta(minutes=30)
+    hass.states.async_set("switch.zone1", STATE_ON)
+
+    _populate_store(
+        hass_storage,
+        entry_id,
+        {
+            "started_at": (finishes_at - timedelta(minutes=30)).isoformat(),
+            "finishes_at": finishes_at.isoformat(),
+            "duration": "not-a-number",
+            "source": "manual",
+            "schedule_id": None,
+        },
+    )
+
+    entry = _base_entry(entry_id)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    scheduler = scheduler_of(entry)
+    assert scheduler.is_watering
+    # Computed from the (still valid) started_at/finishes_at span instead of
+    # crashing: ~1800s.
+    assert scheduler.active_duration == 1800
+
+
+async def test_resumed_run_with_target_not_actuated_aborts_defensively(
+    hass: HomeAssistant, hass_storage, mock_homeassistant_services
+) -> None:
+    """REGRESSION (B10): resuming a run re-arms the stop timer but must also
+    re-verify actuation. If the target is NOT actuated (never really turned
+    on before the crash, or turned off during downtime by something else),
+    the run must not sit "watering" until finishes_at with nothing noticing.
+    """
+    turn_on_calls, turn_off_calls = mock_homeassistant_services
+    entry_id = "recovery_not_actuated"
+    finishes_at = dt_util.utcnow() + timedelta(minutes=30)
+    # The target reports OFF even though the store says a run is active.
+    hass.states.async_set("switch.zone1", STATE_OFF)
+
+    _populate_store(
+        hass_storage,
+        entry_id,
+        {
+            "started_at": (finishes_at - timedelta(minutes=30)).isoformat(),
+            "finishes_at": finishes_at.isoformat(),
+            "duration": 1800,
+            "source": "manual",
+            "schedule_id": None,
+        },
+    )
+
+    entry = _base_entry(entry_id)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    scheduler = scheduler_of(entry)
+    assert not scheduler.is_watering
+    assert turn_on_calls == []
+    assert len(turn_off_calls) == 1  # defensive turn-off, not a real stop
+    store = hass.data[DOMAIN]["store"]
+    assert (await store.async_load())["entries"] == {}
+    # Never confirmed actuated: not logged as a completed (water-delivering) run.
+    assert scheduler.history == []
+
+
 async def test_external_target_off_finishes_run_without_duplicate_dispatch(
     hass: HomeAssistant, setup_zone, mock_homeassistant_services
 ) -> None:
@@ -432,6 +511,155 @@ async def test_failed_turn_off_keeps_store_for_restart_recovery(
     assert off_calls[0].data["entity_id"] == "switch.zone1"
     assert not scheduler_of(entry).is_watering
     assert hass.states.get("switch.zone1").state == STATE_OFF
+    data = await store.async_load()
+    assert data["entries"] == {}
+
+
+async def test_failed_turn_off_then_restart_does_not_double_log_or_double_deduct(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """REGRESSION: a run that genuinely watered but whose turn_off never
+    confirmed (device unreachable) must be logged to history -- and its
+    reservoir volume deducted -- EXACTLY ONCE, not once when
+    _async_finish_run first logs it (store entry survives as the recovery
+    record) and AGAIN when a later restart's downtime recovery finds that
+    surviving record and logs it a second time.
+
+    Before this fix, _async_finish_run logged unconditionally whenever the
+    store entry survived a failed turn_off, and _async_recover_state's
+    downtime branch ALSO logged unconditionally whenever it found a
+    surviving record -- double-counting a single physical run.
+    """
+    from custom_components.irrigation_scheduler.const import (
+        CONF_FLOW_RATE_LPH,
+        CONF_NUMBER_OF_POTS,
+        CONF_RESERVOIR_VOLUME_L,
+    )
+
+    failed_off_calls: list = []
+
+    @callback
+    def _turn_on(call):
+        hass.states.async_set("switch.zone1", STATE_ON)
+
+    def _raising_turn_off(call):
+        failed_off_calls.append(call)
+        raise RuntimeError("device unreachable")
+
+    hass.services.async_register("homeassistant", "turn_on", _turn_on)
+    hass.services.async_register("homeassistant", "turn_off", _raising_turn_off)
+    hass.states.async_set("switch.zone1", STATE_OFF)
+
+    entry = await setup_zone(
+        target_entity_id="switch.zone1",
+        name="Garden",
+        options={
+            CONF_ENABLED: True,
+            CONF_DEFAULT_DURATION: 600,
+            CONF_MAX_DURATION: 7200,
+            CONF_SCHEDULES: [],
+            CONF_FLOW_RATE_LPH: 8,
+            CONF_NUMBER_OF_POTS: 2,
+            CONF_RESERVOIR_VOLUME_L: 100,
+        },
+    )
+    scheduler = scheduler_of(entry)
+
+    await hass.services.async_call(
+        DOMAIN, SERVICE_WATER_NOW, {"entity_id": entity_id_of(hass, entry, "sensor", "next_run")}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    # Stop while turn_off keeps failing: the run is logged HERE (it really
+    # watered) but the store entry survives as the recovery record.
+    future = dt_util.utcnow() + timedelta(seconds=90)
+    with patch.object(dt_util, "utcnow", return_value=future):
+        stop_task = hass.async_create_task(scheduler.async_stop())
+        await asyncio.sleep(0)
+        async_fire_time_changed_exact(
+            hass, future + timedelta(seconds=TURN_OFF_RETRY_DELAY + 2)
+        )
+        await asyncio.sleep(0)
+        async_fire_time_changed_exact(
+            hass, future + timedelta(seconds=TURN_OFF_RETRY_DELAY + 2)
+        )
+        await hass.async_block_till_done()
+    assert stop_task.done()
+    assert len(failed_off_calls) == TURN_OFF_MAX_ATTEMPTS
+
+    assert len(scheduler.history) == 1
+    remaining_after_first_log = scheduler.reservoir_remaining_l
+    assert remaining_after_first_log < 100.0
+
+    store = hass.data[DOMAIN]["store"]
+    data = await store.async_load()
+    assert entry.entry_id in data["entries"]
+    # The surviving record must be marked so recovery does not re-log it.
+    assert data["entries"][entry.entry_id]["history_logged"] is True
+
+    # -- "restart": the run's deadline has long passed, then the same entry
+    # is set up again with a working turn_off --
+    run_state = data["entries"][entry.entry_id]
+    run_state["finishes_at"] = (dt_util.utcnow() - timedelta(minutes=5)).isoformat()
+    await store.async_save_entry(entry.entry_id, run_state)
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    hass.services.async_remove("homeassistant", "turn_off")
+
+    @callback
+    def _working_turn_off(call):
+        hass.states.async_set("switch.zone1", STATE_OFF)
+
+    hass.services.async_register("homeassistant", "turn_off", _working_turn_off)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    new_scheduler = scheduler_of(entry)
+    assert len(new_scheduler.history) == 1
+    assert new_scheduler.reservoir_remaining_l == remaining_after_first_log
+    data = await store.async_load()
+    assert data["entries"] == {}
+
+
+async def test_downtime_recovery_does_not_log_run_with_no_actuation_evidence(
+    hass: HomeAssistant, hass_storage, mock_homeassistant_services
+) -> None:
+    """REGRESSION: a store record with NO persisted ``actuated`` evidence
+    (e.g. the process crashed between async_save_entry and turn_on ever
+    being confirmed) must NOT be logged as a completed run during downtime
+    recovery -- it is still defensively turned off and the record is still
+    removed, but no phantom history entry or reservoir deduction is created
+    for a run that may never have delivered any water."""
+    entry_id = "downtime_no_actuation_evidence"
+    hass.states.async_set("switch.zone1", STATE_OFF)
+
+    _populate_store(
+        hass_storage,
+        entry_id,
+        {
+            "started_at": (dt_util.utcnow() - timedelta(hours=2)).isoformat(),
+            "finishes_at": (dt_util.utcnow() - timedelta(hours=1)).isoformat(),
+            "duration": 600,
+            "source": "manual",
+            "schedule_id": None,
+            # No "actuated" key at all -- simulates a pre-upgrade record or a
+            # crash before any actuation confirmation was ever persisted.
+        },
+    )
+
+    entry = _base_entry(entry_id)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    scheduler = scheduler_of(entry)
+    assert not scheduler.is_watering
+    assert scheduler.history == []
+
+    store = hass.data[DOMAIN]["store"]
     data = await store.async_load()
     assert data["entries"] == {}
 

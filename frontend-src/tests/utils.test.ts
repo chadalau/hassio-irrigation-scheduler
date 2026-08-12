@@ -2,23 +2,33 @@ import { describe, expect, it } from "vitest";
 
 import {
   allDaysLabel,
+  averageDailyVolumeL,
+  dayInitials,
   dayLabels,
   formatDuration,
   formatMl,
   formatRemaining,
+  formatReservoirEstimate,
+  formatSensorReading,
   formatTime,
   formatVolume,
+  formatVolumeFraction,
+  dayLabelFor,
+  durationSecondsForPerPotVolumeMl,
+  groupHistoryByDay,
   isAllDays,
   parseTimeParts,
   perPotVolumeMl,
   progressPct,
   remainingSeconds,
   sanitizeSchedules,
+  sortSchedulesByTime,
   timeToSeconds,
   toServiceTime,
   totalVolumeMl,
   waterVolume,
 } from "../src/utils";
+import type { HistoryRun, Schedule } from "../src/types";
 
 describe("formatTime", () => {
   it("drops :00 seconds", () => {
@@ -77,6 +87,118 @@ describe("dayLabels", () => {
     // that half-localization used to show English day names on pt-BR HA
     // installs whenever hass.locale.language didn't resolve as expected.
     expect(dayLabels()).toEqual(["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]);
+  });
+});
+
+describe("dayInitials", () => {
+  it("returns one letter per day, same order as dayLabels", () => {
+    expect(dayInitials()).toEqual(["S", "T", "Q", "Q", "S", "S", "D"]);
+  });
+});
+
+describe("dayLabelFor", () => {
+  const NOW = "2026-08-13T12:00:00Z";
+
+  it("labels today, yesterday, and older dates", () => {
+    expect(dayLabelFor("2026-08-13T06:00:00Z", NOW)).toBe("Hoje");
+    expect(dayLabelFor("2026-08-12T06:00:00Z", NOW)).toBe("Ontem");
+    expect(dayLabelFor("2026-08-01T06:00:00Z", NOW)).toBe("01/08");
+  });
+
+  it("returns '' for an unparseable date", () => {
+    expect(dayLabelFor("not-a-date", NOW)).toBe("");
+  });
+
+  it("evaluates the day in the given timeZone (HA server's), not the runtime's default", () => {
+    // 23:30 UTC on Aug 1 is still Aug 1 in UTC, but already Aug 2 13:30 in
+    // Pacific/Kiritimati (UTC+14) -- the fallback "DD/MM" label must follow
+    // whichever timeZone is passed, independent of the test runner's own zone.
+    const iso = "2026-08-01T23:30:00Z";
+    const now = "2026-08-10T12:00:00Z"; // far enough to skip Hoje/Ontem
+    expect(dayLabelFor(iso, now, "UTC")).toBe("01/08");
+    expect(dayLabelFor(iso, now, "Pacific/Kiritimati")).toBe("02/08");
+  });
+});
+
+describe("groupHistoryByDay", () => {
+  const NOW = "2026-08-13T12:00:00Z";
+
+  function run(startedAt: string, duration: number): HistoryRun {
+    return {
+      started_at: startedAt,
+      finishes_at: startedAt,
+      duration,
+      source: "schedule",
+      schedule_id: "s1",
+      flow_rate_lph: 8,
+      number_of_pots: 12,
+      ph_value: null,
+      ec_value: null,
+      ec_unit: null,
+      ph_value_2: null,
+      ec_value_2: null,
+      ec_unit_2: null,
+    };
+  }
+
+  it("groups most-recent-first entries by day, labeling Hoje/Ontem/date", () => {
+    const history = [
+      run("2026-08-13T18:00:00Z", 450), // today, later
+      run("2026-08-13T06:00:00Z", 900), // today, earlier
+      run("2026-08-12T06:00:00Z", 900), // yesterday
+      run("2026-08-01T06:00:00Z", 900), // older
+    ];
+
+    const groups = groupHistoryByDay(history, NOW);
+
+    expect(groups.map((g) => g.label)).toEqual(["Hoje", "Ontem", "01/08"]);
+    expect(groups[0].entries).toHaveLength(2);
+    // Order within a day is preserved as given (most-recent-first).
+    expect(groups[0].entries[0].duration).toBe(450);
+    expect(groups[0].entries[1].duration).toBe(900);
+    // 450s @ 8 L/h/pot = 1000 ml/pot * 12 pots = 12000 ml;
+    // 900s @ 8 L/h/pot = 2000 ml/pot * 12 pots = 24000 ml.
+    expect(groups[0].totalMl).toBeCloseTo(36000);
+    expect(groups[1].totalMl).toBeCloseTo(24000);
+  });
+
+  it("skips entries with an unparseable started_at instead of crashing", () => {
+    const history = [run("not-a-date", 900), run("2026-08-13T06:00:00Z", 900)];
+    const groups = groupHistoryByDay(history, NOW);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].entries).toHaveLength(1);
+  });
+
+  it("returns an empty list for empty history", () => {
+    expect(groupHistoryByDay([], NOW)).toEqual([]);
+  });
+
+  it("groups by the given timeZone (server's), not the runtime's default", () => {
+    // 23:30 UTC on Aug 1 and 00:30 UTC on Aug 2 are two different UTC
+    // calendar days, but the SAME local day (Aug 2) in Pacific/Kiritimati
+    // (UTC+14) -- they must land in one group when that timeZone is passed.
+    const history = [run("2026-08-02T00:30:00Z", 300), run("2026-08-01T23:30:00Z", 300)];
+    const now = "2026-08-10T12:00:00Z";
+
+    const utcGroups = groupHistoryByDay(history, now, "UTC");
+    expect(utcGroups).toHaveLength(2);
+
+    const kiritimatiGroups = groupHistoryByDay(history, now, "Pacific/Kiritimati");
+    expect(kiritimatiGroups).toHaveLength(1);
+    expect(kiritimatiGroups[0].entries).toHaveLength(2);
+  });
+});
+
+describe("formatSensorReading", () => {
+  it("rounds to 2 decimals and appends the unit when given", () => {
+    expect(formatSensorReading(6.234)).toBe("6.23");
+    expect(formatSensorReading(812.456, "µS/cm")).toBe("812.46 µS/cm");
+    expect(formatSensorReading(6)).toBe("6");
+  });
+
+  it("renders non-finite/missing values as '?' instead of NaN/blank", () => {
+    expect(formatSensorReading(Number.NaN)).toBe("?");
+    expect(formatSensorReading(Number.POSITIVE_INFINITY)).toBe("?");
   });
 });
 
@@ -211,6 +333,37 @@ describe("sanitizeSchedules", () => {
   });
 });
 
+describe("sortSchedulesByTime", () => {
+  const sched = (time: string, id: string) => ({
+    id,
+    time,
+    days: [0],
+    duration: 60,
+    enabled: true,
+  });
+
+  it("sorts ascending by time of day regardless of input order", () => {
+    const result = sortSchedulesByTime([
+      sched("15:30:00", "c"),
+      sched("06:00:00", "a"),
+      sched("11:30:00", "b"),
+    ]);
+    expect(result.map((s) => s.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("does not mutate the input array", () => {
+    const input = [sched("15:30:00", "c"), sched("06:00:00", "a")];
+    const inputCopy = [...input];
+    sortSchedulesByTime(input);
+    expect(input).toEqual(inputCopy);
+  });
+
+  it("has no effect on an already-sorted list", () => {
+    const input = [sched("06:00:00", "a"), sched("11:30:00", "b")];
+    expect(sortSchedulesByTime(input).map((s) => s.id)).toEqual(["a", "b"]);
+  });
+});
+
 describe("timeToSeconds", () => {
   it("parses HH:MM", () => {
     expect(timeToSeconds("06:00")).toBe(21600);
@@ -285,12 +438,106 @@ describe("formatVolume", () => {
   });
 });
 
+describe("formatVolumeFraction", () => {
+  it("formats remaining/total, each rounded to at most 1 decimal", () => {
+    expect(formatVolumeFraction(620, 1000)).toBe("620/1000 L");
+    expect(formatVolumeFraction(12.345, 20)).toBe("12.3/20 L");
+  });
+
+  it("clamps non-finite/negative input to 0", () => {
+    expect(formatVolumeFraction(Number.NaN, 1000)).toBe("0/1000 L");
+    expect(formatVolumeFraction(-5, 1000)).toBe("0/1000 L");
+  });
+});
+
+function schedule(overrides: Partial<Schedule> = {}): Schedule {
+  return {
+    id: "s1",
+    time: "06:00:00",
+    days: [0, 1, 2, 3, 4, 5, 6],
+    duration: 3600,
+    enabled: true,
+    ...overrides,
+  };
+}
+
+describe("averageDailyVolumeL", () => {
+  it("spreads a daily schedule's per-run volume over 7 days (i.e. equals it)", () => {
+    // 60 L/h * 1h * 1 pot, firing every day -> 60 L/day.
+    expect(
+      averageDailyVolumeL([schedule({ duration: 3600 })], 60, 1),
+    ).toBeCloseTo(60);
+  });
+
+  it("weights by how many days/week the schedule fires", () => {
+    // Same run, but only 1 day/week -> 60 L/week / 7 -> ~8.57 L/day.
+    expect(
+      averageDailyVolumeL([schedule({ duration: 3600, days: [0] })], 60, 1),
+    ).toBeCloseTo(60 / 7);
+  });
+
+  it("ignores disabled schedules", () => {
+    expect(
+      averageDailyVolumeL([schedule({ enabled: false })], 60, 1),
+    ).toBe(0);
+  });
+
+  it("returns 0 when no flow rate is configured", () => {
+    expect(averageDailyVolumeL([schedule()], 0, 1)).toBe(0);
+  });
+
+  it("sums multiple enabled schedules", () => {
+    const schedules = [
+      schedule({ id: "a", duration: 3600, days: [0, 1, 2, 3, 4, 5, 6] }),
+      schedule({ id: "b", duration: 1800, days: [0, 1, 2, 3, 4, 5, 6] }),
+    ];
+    // 60 L/day + 30 L/day.
+    expect(averageDailyVolumeL(schedules, 60, 1)).toBeCloseTo(90);
+  });
+});
+
+describe("formatReservoirEstimate", () => {
+  it("returns null when there is no active consumption", () => {
+    expect(formatReservoirEstimate(500, 0)).toBeNull();
+    expect(formatReservoirEstimate(500, Number.NaN)).toBeNull();
+  });
+
+  it("shows hours when less than a day remains", () => {
+    // 10 L remaining at 60 L/day -> 4 hours.
+    expect(formatReservoirEstimate(10, 60)).toBe("~4 h");
+  });
+
+  it("shows days when between 1 and 60 days remain", () => {
+    // 1000 L remaining at 60 L/day -> ~16.7 days.
+    expect(formatReservoirEstimate(1000, 60)).toBe("~17 dias");
+  });
+
+  it("shows months beyond 60 days", () => {
+    // 6000 L remaining at 10 L/day -> 600 days -> 20 months.
+    expect(formatReservoirEstimate(6000, 10)).toBe("~20 meses");
+  });
+
+  it("reports 'Vazio' when already empty", () => {
+    expect(formatReservoirEstimate(0, 60)).toBe("Vazio");
+    expect(formatReservoirEstimate(-5, 60)).toBe("Vazio");
+  });
+});
+
 describe("perPotVolumeMl / totalVolumeMl / formatMl", () => {
   it("flow applies per pot; total = per-pot volume x pots", () => {
     // 8 L/h over 60 s -> 133.33 ml delivered to one pot.
     expect(perPotVolumeMl(8, 60)).toBeCloseTo(133.33, 1);
     // With 12 pots, the total is ~1600 ml.
     expect(totalVolumeMl(8, 60, 12)).toBeCloseTo(1600);
+  });
+
+  it("CONTRACT: flow_rate_lph is PER POT, not the zone total (8 L/h, 12 pots, 900s)", () => {
+    // Round numbers so the "per pot, not total" contract is checkable by
+    // hand: 8 L/h over 900s = 2 L for ONE pot; 12 pots => 24 L total. Every
+    // label in the UI/services/docs must say "per pot" so a user configuring
+    // the zone's actual total line flow doesn't get a 12x-inflated display.
+    expect(perPotVolumeMl(8, 900)).toBeCloseTo(2000); // 2 L/pot in ml
+    expect(totalVolumeMl(8, 900, 12)).toBeCloseTo(24000); // 24 L total in ml
   });
 
   it("returns null when no flow rate is configured", () => {
@@ -302,6 +549,25 @@ describe("perPotVolumeMl / totalVolumeMl / formatMl", () => {
   it("total equals per-pot volume when pots is not configured", () => {
     expect(totalVolumeMl(8, 60, 0)).toBeCloseTo(133.33, 1);
     expect(totalVolumeMl(8, 60, -1)).toBeCloseTo(133.33, 1);
+  });
+});
+
+describe("durationSecondsForPerPotVolumeMl", () => {
+  it("is the inverse of perPotVolumeMl", () => {
+    const seconds = durationSecondsForPerPotVolumeMl(8, 2000);
+    expect(seconds).toBe(900); // matches the 8 L/h, 900s -> 2000 ml contract above
+    expect(perPotVolumeMl(8, seconds!)).toBeCloseTo(2000);
+  });
+
+  it("returns null when no flow rate is configured", () => {
+    expect(durationSecondsForPerPotVolumeMl(0, 500)).toBeNull();
+    expect(durationSecondsForPerPotVolumeMl(-5, 500)).toBeNull();
+  });
+
+  it("treats a non-positive/non-finite volume as 0 ml -> 0 seconds", () => {
+    expect(durationSecondsForPerPotVolumeMl(8, 0)).toBe(0);
+    expect(durationSecondsForPerPotVolumeMl(8, -100)).toBe(0);
+    expect(durationSecondsForPerPotVolumeMl(8, Number.NaN)).toBe(0);
   });
 
   it("formats ml and switches to liters above 1000 ml", () => {

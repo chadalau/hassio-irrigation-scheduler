@@ -16,6 +16,7 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.irrigation_scheduler.const import (
     CONF_DEFAULT_DURATION,
+    CONF_EC_ENTITY_ID,
     CONF_ENABLED,
     CONF_FLOW_RATE_LPH,
     CONF_MAX_DURATION,
@@ -23,6 +24,8 @@ from custom_components.irrigation_scheduler.const import (
     CONF_RESERVOIR_VOLUME_L,
     CONF_SCHEDULES,
     DOMAIN,
+    SERVICE_ADD_SCHEDULE,
+    SERVICE_REMOVE_SCHEDULE,
     SERVICE_SET_SCHEDULES,
     SERVICE_SET_ZONE_OPTIONS,
     SERVICE_UPDATE_SCHEDULE,
@@ -184,6 +187,114 @@ async def test_update_schedule_preserves_id_end_to_end(
     assert updated[0]["id"] == "aaaa1111"
     assert updated[0]["duration"] == 1200
     assert updated[0]["time"] == "06:00:00"
+
+
+async def test_add_schedule_with_colliding_id_generates_a_fresh_id(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """REGRESSION (B7): add_schedule accepts an optional caller-supplied id
+    (needed so set_schedules can preserve ids of existing items), but must
+    never silently create a DUPLICATE id -- a fresh one is generated instead.
+    """
+    schedules = [
+        {
+            "id": "aaaa1111",
+            "time": "06:00:00",
+            "days": [0],
+            "duration": 900,
+            "enabled": True,
+        }
+    ]
+    entry = await setup_zone(
+        target_entity_id="switch.zone1",
+        name="Garden",
+        options={
+            CONF_ENABLED: True,
+            CONF_DEFAULT_DURATION: 600,
+            CONF_MAX_DURATION: 7200,
+            CONF_SCHEDULES: schedules,
+        },
+    )
+    sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
+    assert sensor_eid
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_ADD_SCHEDULE,
+        {
+            "entity_id": sensor_eid,
+            "id": "aaaa1111",  # collides with the existing schedule
+            "time": "07:00:00",
+            "days": [1],
+            "duration": 300,
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    stored = list(entry.options[CONF_SCHEDULES])
+    assert len(stored) == 2
+    ids = [s["id"] for s in stored]
+    assert len(set(ids)) == 2  # no duplicate
+    assert ids[0] == "aaaa1111"  # the original entry is untouched
+    assert ids[1] != "aaaa1111"  # the new one got a fresh id
+
+
+async def test_update_schedule_unknown_id_raises_instead_of_silent_noop(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """REGRESSION (B8): a typo'd/unknown schedule id must surface an error,
+    not silently do nothing."""
+    entry = await setup_zone(target_entity_id="switch.zone1", name="Garden")
+    sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
+    assert sensor_eid
+
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_UPDATE_SCHEDULE,
+            {"entity_id": sensor_eid, "id": "does-not-exist", "duration": 300},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
+
+
+async def test_remove_schedule_unknown_id_raises_instead_of_silent_noop(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """REGRESSION (B8): a typo'd/unknown schedule id must surface an error,
+    not silently do nothing."""
+    entry = await setup_zone(target_entity_id="switch.zone1", name="Garden")
+    sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
+    assert sensor_eid
+
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_REMOVE_SCHEDULE,
+            {"entity_id": sensor_eid, "id": "does-not-exist"},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
+
+
+async def test_set_schedules_without_schedules_field_raises_service_validation_error(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """REGRESSION (B1/deepseek): missing the required 'schedules' field used
+    to raise a bare KeyError instead of a proper ServiceValidationError."""
+    entry = await setup_zone(target_entity_id="switch.zone1", name="Garden")
+    sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
+    assert sensor_eid
+
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_SCHEDULES,
+            {"entity_id": sensor_eid},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
 
 
 async def test_service_targets_device_and_area(
@@ -369,6 +480,81 @@ async def test_set_zone_options_updates_flow_rate_and_pots(hass: HomeAssistant, 
     assert state.attributes[CONF_FLOW_RATE_LPH] == 300
     assert state.attributes[CONF_NUMBER_OF_POTS] == 12
     assert state.attributes[CONF_RESERVOIR_VOLUME_L] == 1000
+
+
+async def test_set_zone_options_updates_and_clears_ec_entity(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """ec_entity_id is display-only: it can be set and explicitly cleared,
+    same empty-string-disables semantics as ph_entity_id, but never gates a
+    run (there is no min/max for it)."""
+    entry = await setup_zone(target_entity_id="switch.zone1", name="Garden")
+    sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
+    assert sensor_eid
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_SET_ZONE_OPTIONS,
+        {"entity_id": sensor_eid, CONF_EC_ENTITY_ID: "sensor.reservoir_ec"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    scheduler = scheduler_of(entry)
+    assert scheduler.ec_entity_id == "sensor.reservoir_ec"
+    state = hass.states.get(sensor_eid)
+    assert state is not None
+    assert state.attributes[CONF_EC_ENTITY_ID] == "sensor.reservoir_ec"
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_SET_ZONE_OPTIONS,
+        {"entity_id": sensor_eid, CONF_EC_ENTITY_ID: ""},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    assert scheduler.ec_entity_id == ""
+
+
+async def test_set_zone_options_updates_default_duration(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """default_duration is editable from the card's settings panel, used by
+    water_now, and validated against the zone's stored max_duration."""
+    entry = await setup_zone(
+        target_entity_id="switch.zone1",
+        name="Garden",
+        options={
+            CONF_ENABLED: True,
+            CONF_DEFAULT_DURATION: 600,
+            CONF_MAX_DURATION: 1200,
+            CONF_SCHEDULES: [],
+        },
+    )
+    sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
+    assert sensor_eid
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_SET_ZONE_OPTIONS,
+        {"entity_id": sensor_eid, CONF_DEFAULT_DURATION: 900},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    scheduler = scheduler_of(entry)
+    assert scheduler.default_duration == 900
+
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_ZONE_OPTIONS,
+            {"entity_id": sensor_eid, CONF_DEFAULT_DURATION: 1201},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
+    # Rejected: still the previously valid value, not the invalid one.
+    assert scheduler.default_duration == 900
 
 
 async def test_set_zone_options_rejects_negative(hass: HomeAssistant, setup_zone) -> None:

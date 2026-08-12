@@ -61,6 +61,8 @@ class IrrigationSchedulerBinarySensor(BinarySensorEntity):
             "duration": self._scheduler.active_duration,
             "source": self._scheduler.active_source,
             "schedule_id": self._scheduler.active_schedule_id,
+            "last_run": self._scheduler.last_run,
+            "history": self._scheduler.history,
         }
 
     async def async_added_to_hass(self) -> None:

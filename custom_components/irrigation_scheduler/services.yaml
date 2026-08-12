@@ -22,6 +22,13 @@ stop:
     entity:
       integration: irrigation_scheduler
 
+refill_reservoir:
+  name: Refill reservoir
+  description: Reset the tracked remaining reservoir volume back to full capacity (reservoir_volume_l).
+  target:
+    entity:
+      integration: irrigation_scheduler
+
 add_schedule:
   name: Add schedule
   description: Add a new irrigation schedule to the zone.
@@ -158,14 +165,23 @@ set_schedules:
 
 set_zone_options:
   name: Set zone options
-  description: Update optional zone settings (flow rate, number of pots, reservoir volume and the pH gate).
+  description: Update optional zone settings (default duration, flow rate, number of pots, reservoir volume and the pH gate for up to two independent reservoirs).
   target:
     entity:
       integration: irrigation_scheduler
   fields:
+    default_duration:
+      name: Default duration
+      description: Default watering duration in seconds, used by water_now when no duration is given. Must not exceed the zone's max_duration.
+      selector:
+        number:
+          min: 1
+          max: 86400
+          unit_of_measurement: s
+          mode: box
     flow_rate_lph:
-      name: Flow rate
-      description: Watering flow rate in liters per hour.
+      name: Flow rate per pot
+      description: Watering flow rate PER POT, in liters per hour (multiplied by number_of_pots for the total volume shown on the card).
       selector:
         number:
           min: 0
@@ -211,4 +227,37 @@ set_zone_options:
           min: 0
           max: 14
           step: 0.1
+    ec_entity_id:
+      name: EC sensor
+      description: Entity id of an EC (conductivity) sensor. Display-only -- it never gates a run, it only feeds the card's EC badge. Send an empty string to clear it.
+      selector:
+        text:
+          mode: box
+    ph_entity_id_2:
+      name: R2 pH sensor
+      description: Entity id of a pH sensor for a SECOND, independent reservoir (e.g. one pump/outlet feeding two tanks). When set, SCHEDULED runs only start while BOTH reservoirs read within their own range. Send an empty string to disable.
+      selector:
+        text:
+    ph_min_2:
+      name: R2 minimum pH
+      description: Minimum pH (0-14) for the second reservoir.
+      selector:
+        number:
+          min: 0
+          max: 14
+          step: 0.1
+          mode: box
+    ph_max_2:
+      name: R2 maximum pH
+      description: Maximum pH (0-14) for the second reservoir.
+      selector:
+        number:
+          min: 0
+          max: 14
+          step: 0.1
+    ec_entity_id_2:
+      name: R2 EC sensor
+      description: Entity id of an EC sensor for the second reservoir. Display-only. Send an empty string to clear it.
+      selector:
+        text:
           mode: box

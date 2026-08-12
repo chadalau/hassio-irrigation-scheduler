@@ -1,4 +1,4 @@
-import type { Schedule } from "./types";
+import type { HistoryRun, Schedule } from "./types";
 
 const DAYS_PT = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"] as const;
 
@@ -57,6 +57,16 @@ export function dayLabels(): string[] {
 /** Label shown when every day of the week is selected. */
 export function allDaysLabel(): string {
   return "Todos os dias";
+}
+
+/**
+ * Single-letter day initials, same order/index as ``dayLabels()`` (index 0 =
+ * Monday). Deliberately ambiguous on its own (Seg/Sex/Sáb all start with
+ * "S", Qua/Qui both start with "Q") -- the fixed position in the 7-letter
+ * strip conveys which day it is, not the letter alone.
+ */
+export function dayInitials(): string[] {
+  return dayLabels().map((label) => label.charAt(0));
 }
 
 /** True when ``days`` covers Monday..Sunday (all week). */
@@ -119,6 +129,71 @@ export function formatVolume(liters: number): string {
   return `${rounded} L`;
 }
 
+/** "620/1000 L" (each side rounded to at most 1 decimal). */
+export function formatVolumeFraction(remainingL: number, totalL: number): string {
+  const round1 = (value: number) => Math.round(value * 10) / 10;
+  const remaining = round1(Number.isFinite(remainingL) ? Math.max(0, remainingL) : 0);
+  const total = round1(Number.isFinite(totalL) ? Math.max(0, totalL) : 0);
+  return `${remaining}/${total} L`;
+}
+
+/**
+ * Average liters/day the zone's ENABLED schedules would consume, at
+ * ``flowLph``/``pots``. A schedule's weekly contribution is its per-run
+ * total volume times how many days/week it fires; the average is that sum
+ * spread over 7 days. Returns 0 when there is nothing enabled (or no flow
+ * rate configured) -- callers use that to hide the "time until empty"
+ * estimate rather than showing a nonsensical infinite runway.
+ */
+export function averageDailyVolumeL(
+  schedules: readonly Schedule[],
+  flowLph: number,
+  pots: number,
+): number {
+  let weeklyMl = 0;
+  for (const schedule of schedules) {
+    if (!schedule.enabled) {
+      continue;
+    }
+    const total = totalVolumeMl(flowLph, schedule.duration, pots);
+    if (total === null) {
+      continue;
+    }
+    weeklyMl += total * schedule.days.length;
+  }
+  return weeklyMl / 1000 / 7;
+}
+
+/**
+ * "~3 h" / "~12 dias" / "~2 meses" estimate of when the reservoir runs dry,
+ * given its current remaining volume and the zone's average daily
+ * consumption. Adaptive units: hours below one day, days up to 60, months
+ * beyond that. Returns "Vazio" when already empty, and `null` (no estimate
+ * to show) when there is no active consumption to project from.
+ */
+export function formatReservoirEstimate(
+  remainingL: number,
+  avgDailyVolumeL: number,
+): string | null {
+  if (!Number.isFinite(avgDailyVolumeL) || avgDailyVolumeL <= 0) {
+    return null;
+  }
+  const remaining = Number.isFinite(remainingL) ? Math.max(0, remainingL) : 0;
+  if (remaining <= 0) {
+    return "Vazio";
+  }
+  const days = remaining / avgDailyVolumeL;
+  if (days < 1) {
+    const hours = Math.max(1, Math.round(days * 24));
+    return `~${hours} h`;
+  }
+  if (days <= 60) {
+    return `~${Math.max(1, Math.round(days))} dias`;
+  }
+  const months = Math.max(1, Math.round(days / 30));
+  return `~${months} meses`;
+}
+
 /**
  * Milliliters delivered to ONE pot for a run. ``flowLph`` is the flow rate
  * PER POT; the number of pots does not change what a single pot receives.
@@ -130,6 +205,25 @@ export function perPotVolumeMl(
 ): number | null {
   const liters = waterVolume(flowLph, durationSeconds);
   return liters === null ? null : liters * 1000;
+}
+
+/**
+ * Inverse of ``perPotVolumeMl``: the duration (seconds) a run needs to
+ * deliver ``volumeMl`` to ONE pot at ``flowLph`` liters per hour. Returns
+ * ``null`` when no flow rate is configured (0 or missing) -- there is no
+ * duration that would satisfy a target volume without a known flow rate.
+ */
+export function durationSecondsForPerPotVolumeMl(
+  flowLph: number,
+  volumeMl: number,
+): number | null {
+  const safe = Number.isFinite(flowLph) ? flowLph : 0;
+  if (safe <= 0) {
+    return null;
+  }
+  const ml = Number.isFinite(volumeMl) ? Math.max(0, volumeMl) : 0;
+  const liters = ml / 1000;
+  return Math.round((liters / safe) * 3600);
 }
 
 /**
@@ -232,6 +326,17 @@ export function sanitizeSchedules(raw: unknown): Schedule[] {
   return result;
 }
 
+/**
+ * Sorted copy, ascending by time of day. Display order only -- it has no
+ * effect on which schedule fires next (that is computed purely from time +
+ * days, regardless of list order).
+ */
+export function sortSchedulesByTime(schedules: Schedule[]): Schedule[] {
+  return [...schedules].sort(
+    (a, b) => timeToSeconds(a.time) - timeToSeconds(b.time),
+  );
+}
+
 /** Seconds since midnight, or -1 for invalid/out-of-range input. */
 export function timeToSeconds(time: string): number {
   const parts = parseTimeParts(time);
@@ -239,6 +344,20 @@ export function timeToSeconds(time: string): number {
     return -1;
   }
   return parts.hour * 3600 + parts.minute * 60 + parts.second;
+}
+
+/**
+ * Format a live sensor reading (pH/EC badge next to the zone title):
+ * rounds to 2 decimals and appends the unit when known. Non-finite/missing
+ * values render as "?" so a badge is still shown (and still clickable to
+ * open history) even while the sensor is unavailable/unknown.
+ */
+export function formatSensorReading(value: number, unit?: string): string {
+  if (!Number.isFinite(value)) {
+    return "?";
+  }
+  const rounded = Math.round(value * 100) / 100;
+  return unit ? `${rounded} ${unit}` : `${rounded}`;
 }
 
 /** Normalize a time string to the backend's "HH:MM:SS" format. */
@@ -251,4 +370,96 @@ export function toServiceTime(time: string): string {
   const minute = String(parts.minute).padStart(2, "0");
   const second = String(parts.second).padStart(2, "0");
   return `${hour}:${minute}:${second}`;
+}
+
+/** One calendar day's worth of history entries, most-recent-day-first. */
+export interface HistoryDayGroup {
+  /** "Hoje" / "Ontem" / "12/08". */
+  label: string;
+  /** Most-recent-run-first, mirroring the order ``history`` already arrives in. */
+  entries: HistoryRun[];
+  /** Sum of totalVolumeMl() across every run that day. */
+  totalMl: number;
+}
+
+/**
+ * "YYYY-MM-DD" for ``date`` in ``timeZone`` (the HA SERVER's zone when
+ * given; falls back to the runtime's own zone when undefined). Used as a
+ * comparable/sortable calendar-day key instead of ``Date.toDateString()``,
+ * which is always the BROWSER's local zone and cannot take a timeZone
+ * override -- comparing by it would group/label a run's day relative to
+ * whoever is looking at the dashboard, not to the HA instance actually
+ * running the schedule.
+ */
+function dayKey(date: Date, timeZone?: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+/**
+ * "Hoje" / "Ontem" / "12/08" for a date relative to ``nowIso``, both
+ * evaluated in ``timeZone`` (the HA server's zone); "" if ``iso`` is
+ * unparseable.
+ */
+export function dayLabelFor(iso: string, nowIso: string, timeZone?: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const now = new Date(nowIso);
+  if (dayKey(date, timeZone) === dayKey(now, timeZone)) {
+    return "Hoje";
+  }
+  // Exactly 24h back in absolute time, then re-keyed in timeZone -- avoids
+  // browser-local calendar math (setDate) disagreeing with the target zone
+  // around a midnight boundary.
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  if (dayKey(date, timeZone) === dayKey(yesterday, timeZone)) {
+    return "Ontem";
+  }
+  return new Intl.DateTimeFormat("pt-BR", { timeZone, day: "2-digit", month: "2-digit" }).format(
+    date,
+  );
+}
+
+/**
+ * Groups history entries by calendar day IN ``timeZone`` (the HA server's
+ * zone, so grouping/labels match when the schedule actually fired,
+ * regardless of the viewing browser's own zone), labeling today/yesterday
+ * and summing each day's total delivered volume. ``history`` is assumed
+ * most-recent-first already (the backend's order); day groups come out
+ * most-recent-day-first too, since a Map preserves first-insertion order.
+ */
+export function groupHistoryByDay(
+  history: readonly HistoryRun[],
+  nowIso: string,
+  timeZone?: string,
+): HistoryDayGroup[] {
+  const groups = new Map<string, HistoryDayGroup>();
+  for (const entry of history) {
+    const date = new Date(entry.started_at);
+    if (Number.isNaN(date.getTime())) {
+      continue;
+    }
+    const key = dayKey(date, timeZone);
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        label: dayLabelFor(entry.started_at, nowIso, timeZone),
+        entries: [],
+        totalMl: 0,
+      };
+      groups.set(key, group);
+    }
+    group.entries.push(entry);
+    const total = totalVolumeMl(entry.flow_rate_lph, entry.duration, entry.number_of_pots);
+    if (total !== null) {
+      group.totalMl += total;
+    }
+  }
+  return Array.from(groups.values());
 }

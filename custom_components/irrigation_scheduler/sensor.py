@@ -71,9 +71,15 @@ class IrrigationSchedulerSensor(SensorEntity):
             "flow_rate_lph": self._scheduler.flow_rate_lph,
             "number_of_pots": self._scheduler.number_of_pots,
             "reservoir_volume_l": self._scheduler.reservoir_volume_l,
+            "reservoir_remaining_l": self._scheduler.reservoir_remaining_l,
             "ph_entity_id": self._scheduler.ph_entity_id,
             "ph_min": self._scheduler.ph_min,
             "ph_max": self._scheduler.ph_max,
+            "ec_entity_id": self._scheduler.ec_entity_id,
+            "ph_entity_id_2": self._scheduler.ph_entity_id_2,
+            "ph_min_2": self._scheduler.ph_min_2,
+            "ph_max_2": self._scheduler.ph_max_2,
+            "ec_entity_id_2": self._scheduler.ec_entity_id_2,
             "schedule_warnings": self._scheduler.schedule_warnings,
             "switch_entity_id": self._switch_entity_id,
             "binary_sensor_entity_id": self._binary_sensor_entity_id,
@@ -116,7 +122,10 @@ class IrrigationSchedulerSensor(SensorEntity):
         """Re-attempt sibling resolution when this entry's registry changes."""
         if event.data.get("action") == "remove":
             return
-        entity_entry = er.async_get(self.hass).async_get(event.data["entity_id"])
+        entity_id = event.data.get("entity_id")
+        if entity_id is None:
+            return
+        entity_entry = er.async_get(self.hass).async_get(entity_id)
         if (
             entity_entry is None
             or entity_entry.config_entry_id != self._scheduler.entry.entry_id

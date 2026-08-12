@@ -1,6 +1,9 @@
 # Revisao Consolidada — watergaia
 
-**Status: PRECISA DE ALTERACAO**
+**Status original: PRECISA DE ALTERACAO** · **Status apos correcoes
+(2026-08-12): todos os achados abaixo foram corrigidos** — ver secao
+"Correcoes aplicadas" ao final deste documento para o detalhe de cada um e
+os testes de regressao adicionados.
 
 ## Revisores
 
@@ -116,3 +119,59 @@ revisao nao esta aprovada.
 3. Validar faixa de pH usando options atuais + patch.
 4. Clarificar a unidade `L/h por vaso`.
 5. Adicionar testes de regressao e executar novamente os tres reviewers.
+
+## Correcoes aplicadas — 2026-08-12
+
+Todos os itens da rodada recomendada acima, mais os achados menores, foram
+corrigidos nesta sessao (verificado empiricamente, nao so por leitura
+estatica — reproduzi o bypass de `NaN` e o crash de recovery/schedule antes
+de corrigir):
+
+1. **CRITICO `NaN` no pH gate** — `_check_ph_gate()` agora rejeita valores
+   nao finitos com `math.isfinite()` apos o `float()`. Testes cobrindo
+   `nan`/`NaN`/`-nan`/`inf`/`-inf` adicionados a
+   `test_scheduled_run_skipped_when_ph_sensor_unusable`.
+2. **ALTO recovery com `duration` corrompido** — `_async_recover_state()` usa
+   `_coerce_stored_duration()` (calcula a partir de `started_at..finishes_at`
+   em vez de um `int()` cru) e nunca mais derruba o setup da zona. Como
+   bonus, uma rega retomada agora tambem re-verifica atuacao
+   (`_async_target_is_actuated()`) em vez de so re-armar o timer de parada —
+   fechando de quebra o achado B10 (recovery sem checar atuacao).
+3. **MEDIO schedule corrompido mata o agendamento** — a property `schedules`
+   filtra itens com `duration` invalida/fora de faixa (mesmo criterio ja
+   usado para itens nao-dict); `_async_schedule_fired` roda em
+   `try/finally` como defesa extra.
+4. **MEDIO patch parcial inverte a faixa de pH** — `async_set_zone_options`
+   valida `ph_min <= ph_max` contra o estado EFETIVO (options atuais + patch),
+   nao so os campos da mesma chamada; levanta `ServiceValidationError`.
+5. **MEDIO unidade `L/h` ambigua** — relabeled para "Vazao por vaso (L/h)" /
+   "Flow rate per pot (L/h)" em `strings.json`, traducoes, `services.yaml` e
+   no card; teste de contrato explicito (8 L/h, 12 vasos, 900s = 2 L/vaso,
+   24 L total) adicionado.
+6. **Achados menores**: `set_schedules` sem a chave `schedules` agora levanta
+   `ServiceValidationError` (nao mais `KeyError` cru); `add_schedule` com id
+   colidindo gera um id novo em vez de duplicar; `update_schedule`/
+   `remove_schedule` com id inexistente levantam erro em vez de no-op
+   silencioso; o "proximo horario" do card usa o fuso do servidor HA
+   (`hass.config.time_zone`), nao o do navegador; o campo de pH no painel de
+   settings nao reverte mais visualmente ao valor antigo quando limpo; o
+   painel de settings nao chama mais o servico quando nada mudou;
+   `ALL_SERVICES` no `test_init.py` agora inclui `set_zone_options`.
+   **Nao corrigido de proposito**: o seletor de entidade de pH/EC continua
+   aceitando qualquer `sensor.*` (sem filtro por `device_class`) — filtrar
+   esconderia sensores DIY validos sem `device_class` correto, e o gate ja e
+   fail-safe para uma entidade errada.
+
+Alem da correcao dos achados, esta sessao tambem adicionou uma feature nova:
+sensor de EC opcional (`ec_entity_id`, so exibicao, nunca trava uma rega,
+espelhando `ph_entity_id`) e badges de pH/EC ao lado do nome da zona no card
+mostrando a leitura ao vivo, clicaveis para abrir o dialogo nativo de
+historico do Home Assistant (`hass-more-info`) em vez de um grafico custom.
+
+**Validacao final (2026-08-12):**
+
+| Camada | Verificacao | Resultado |
+|---|---|---|
+| Backend puro | `pytest tests/test_next_run.py tests/test_schedules.py` | 28 passed |
+| Backend + HA | `pytest tests -q` (HA 2026.2.3 + PHCC) | 91 passed |
+| Frontend | `npm run typecheck` / `npm run test` / `npm run build` | 0 erros / 71 passed / bundle reconstruido |

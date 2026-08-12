@@ -8,18 +8,24 @@
           "name": "Nome da zona",
           "target_entity_id": "Entidade alvo",
           "default_duration": "Duração padrão (minutos)",
-          "flow_rate_lph": "Vazão (L/h)",
+          "flow_rate_lph": "Vazão por vaso (L/h)",
           "number_of_pots": "Número de vasos (opcional)",
           "reservoir_volume_l": "Volume do reservatório (L, opcional)",
           "ph_entity_id": "Sensor de pH (opcional)",
+          "ec_entity_id": "Sensor de EC (opcional, só exibição)",
           "ph_min": "pH mínimo para regar",
-          "ph_max": "pH máximo para regar"
+          "ph_max": "pH máximo para regar",
+          "ph_entity_id_2": "Sensor de pH R2 (opcional, segundo reservatório)",
+          "ec_entity_id_2": "Sensor de EC R2 (opcional, só exibição)",
+          "ph_min_2": "pH mínimo R2 para regar",
+          "ph_max_2": "pH máximo R2 para regar"
         }
       }
     },
     "error": {
       "default_duration_too_high": "A duração padrão não pode exceder a duração máxima.",
-      "ph_min_too_high": "O pH mínimo não pode ser maior que o pH máximo."
+      "ph_min_too_high": "O pH mínimo não pode ser maior que o pH máximo.",
+      "ph_min_too_high_2": "O pH mínimo R2 não pode ser maior que o pH máximo R2."
     },
     "abort": {
       "already_configured": "Esta entidade alvo já está configurada como zona de irrigação."
@@ -33,18 +39,24 @@
         "data": {
           "default_duration": "Duração padrão (minutos)",
           "max_duration": "Duração máxima (minutos)",
-          "flow_rate_lph": "Vazão (L/h)",
+          "flow_rate_lph": "Vazão por vaso (L/h)",
           "number_of_pots": "Número de vasos (opcional)",
           "reservoir_volume_l": "Volume do reservatório (L, opcional)",
           "ph_entity_id": "Sensor de pH (opcional)",
+          "ec_entity_id": "Sensor de EC (opcional, só exibição)",
           "ph_min": "pH mínimo para regar",
-          "ph_max": "pH máximo para regar"
+          "ph_max": "pH máximo para regar",
+          "ph_entity_id_2": "Sensor de pH R2 (opcional, segundo reservatório)",
+          "ec_entity_id_2": "Sensor de EC R2 (opcional, só exibição)",
+          "ph_min_2": "pH mínimo R2 para regar",
+          "ph_max_2": "pH máximo R2 para regar"
         }
       }
     },
     "error": {
       "default_duration_too_high": "A duração padrão não pode exceder a duração máxima.",
-      "ph_min_too_high": "O pH mínimo não pode ser maior que o pH máximo."
+      "ph_min_too_high": "O pH mínimo não pode ser maior que o pH máximo.",
+      "ph_min_too_high_2": "O pH mínimo R2 não pode ser maior que o pH máximo R2."
     }
   },
   "entity": {
@@ -78,6 +90,11 @@
     "stop": {
       "name": "Parar",
       "description": "Pare a irrigação imediatamente e desligue a entidade alvo.",
+      "fields": {}
+    },
+    "refill_reservoir": {
+      "name": "Reabastecer reservatório",
+      "description": "Zera o consumo rastreado e volta o volume restante para a capacidade total (reservoir_volume_l).",
       "fields": {}
     },
     "add_schedule": {
@@ -150,11 +167,15 @@
     },
     "set_zone_options": {
       "name": "Definir opções da zona",
-      "description": "Atualize opções opcionais da zona (vazão, número de vasos, volume do reservatório e o gate de pH).",
+      "description": "Atualize opções opcionais da zona (duração padrão, vazão, número de vasos, volume do reservatório e o gate de pH para até dois reservatórios independentes).",
       "fields": {
+        "default_duration": {
+          "name": "Duração padrão",
+          "description": "Duração padrão da rega em segundos, usada pelo water_now quando nenhuma duração é informada. Não pode exceder o max_duration da zona."
+        },
         "flow_rate_lph": {
-          "name": "Vazão",
-          "description": "Vazão da irrigação em litros por hora."
+          "name": "Vazão por vaso",
+          "description": "Vazão de irrigação POR VASO, em litros por hora (multiplicada por number_of_pots para o volume total exibido no card)."
         },
         "number_of_pots": {
           "name": "Número de vasos",
@@ -175,6 +196,26 @@
         "ph_max": {
           "name": "pH máximo",
           "description": "pH máximo (0-14) que permite uma rega agendada começar."
+        },
+        "ec_entity_id": {
+          "name": "Sensor de EC",
+          "description": "ID da entidade de um sensor de EC (condutividade). Só exibição: nunca trava uma rega, apenas alimenta o indicador de EC do card. Envie uma string vazia para limpar."
+        },
+        "ph_entity_id_2": {
+          "name": "Sensor de pH R2",
+          "description": "ID da entidade de um sensor de pH para um SEGUNDO reservatório independente (ex.: uma tomada/bomba alimentando dois reservatórios). Quando definido, regas AGENDADAS só começam se AMBOS os reservatórios estiverem dentro da própria faixa. Envie uma string vazia para desativar."
+        },
+        "ph_min_2": {
+          "name": "pH mínimo R2",
+          "description": "pH mínimo (0-14) do segundo reservatório."
+        },
+        "ph_max_2": {
+          "name": "pH máximo R2",
+          "description": "pH máximo (0-14) do segundo reservatório."
+        },
+        "ec_entity_id_2": {
+          "name": "Sensor de EC R2",
+          "description": "ID da entidade de um sensor de EC do segundo reservatório. Só exibição. Envie uma string vazia para limpar."
         }
       }
     }

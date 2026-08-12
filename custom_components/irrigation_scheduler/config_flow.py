@@ -12,24 +12,34 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_DEFAULT_DURATION,
+    CONF_EC_ENTITY_ID,
+    CONF_EC_ENTITY_ID_2,
     CONF_ENABLED,
     CONF_FLOW_RATE_LPH,
     CONF_MAX_DURATION,
     CONF_NAME,
     CONF_NUMBER_OF_POTS,
     CONF_PH_ENTITY_ID,
+    CONF_PH_ENTITY_ID_2,
     CONF_PH_MAX,
+    CONF_PH_MAX_2,
     CONF_PH_MIN,
+    CONF_PH_MIN_2,
     CONF_RESERVOIR_VOLUME_L,
     CONF_SCHEDULES,
     CONF_TARGET_ENTITY_ID,
     DEFAULT_DEFAULT_DURATION,
+    DEFAULT_EC_ENTITY_ID,
+    DEFAULT_EC_ENTITY_ID_2,
     DEFAULT_FLOW_RATE_LPH,
     DEFAULT_MAX_DURATION,
     DEFAULT_NUMBER_OF_POTS,
     DEFAULT_PH_ENTITY_ID,
+    DEFAULT_PH_ENTITY_ID_2,
     DEFAULT_PH_MAX,
+    DEFAULT_PH_MAX_2,
     DEFAULT_PH_MIN,
+    DEFAULT_PH_MIN_2,
     DEFAULT_RESERVOIR_VOLUME_L,
     DOMAIN,
     PH_SCALE_MAX,
@@ -56,8 +66,12 @@ class IrrigationSchedulerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             ph_min = float(user_input.get(CONF_PH_MIN, DEFAULT_PH_MIN))
             ph_max = float(user_input.get(CONF_PH_MAX, DEFAULT_PH_MAX))
+            ph_min_2 = float(user_input.get(CONF_PH_MIN_2, DEFAULT_PH_MIN_2))
+            ph_max_2 = float(user_input.get(CONF_PH_MAX_2, DEFAULT_PH_MAX_2))
             if ph_min > ph_max:
                 errors["base"] = "ph_min_too_high"
+            elif ph_min_2 > ph_max_2:
+                errors["base"] = "ph_min_too_high_2"
             else:
                 target_entity_id: str = user_input[CONF_TARGET_ENTITY_ID]
 
@@ -70,6 +84,13 @@ class IrrigationSchedulerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 number_of_pots = int(user_input[CONF_NUMBER_OF_POTS])
                 reservoir_volume = int(user_input[CONF_RESERVOIR_VOLUME_L])
                 ph_entity_id = user_input.get(CONF_PH_ENTITY_ID) or DEFAULT_PH_ENTITY_ID
+                ec_entity_id = user_input.get(CONF_EC_ENTITY_ID) or DEFAULT_EC_ENTITY_ID
+                ph_entity_id_2 = (
+                    user_input.get(CONF_PH_ENTITY_ID_2) or DEFAULT_PH_ENTITY_ID_2
+                )
+                ec_entity_id_2 = (
+                    user_input.get(CONF_EC_ENTITY_ID_2) or DEFAULT_EC_ENTITY_ID_2
+                )
 
                 return self.async_create_entry(
                     title=user_input[CONF_NAME],
@@ -87,6 +108,11 @@ class IrrigationSchedulerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_PH_ENTITY_ID: ph_entity_id,
                         CONF_PH_MIN: ph_min,
                         CONF_PH_MAX: ph_max,
+                        CONF_EC_ENTITY_ID: ec_entity_id,
+                        CONF_PH_ENTITY_ID_2: ph_entity_id_2,
+                        CONF_PH_MIN_2: ph_min_2,
+                        CONF_PH_MAX_2: ph_max_2,
+                        CONF_EC_ENTITY_ID_2: ec_entity_id_2,
                         CONF_SCHEDULES: [],
                     },
                 )
@@ -161,6 +187,35 @@ class IrrigationSchedulerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             step=0.1,
                         )
                     ),
+                    vol.Optional(CONF_EC_ENTITY_ID): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="sensor")
+                    ),
+                    vol.Optional(CONF_PH_ENTITY_ID_2): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="sensor")
+                    ),
+                    vol.Optional(
+                        CONF_PH_MIN_2, default=DEFAULT_PH_MIN_2
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            mode=selector.NumberSelectorMode.BOX,
+                            min=PH_SCALE_MIN,
+                            max=PH_SCALE_MAX,
+                            step=0.1,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_PH_MAX_2, default=DEFAULT_PH_MAX_2
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            mode=selector.NumberSelectorMode.BOX,
+                            min=PH_SCALE_MIN,
+                            max=PH_SCALE_MAX,
+                            step=0.1,
+                        )
+                    ),
+                    vol.Optional(CONF_EC_ENTITY_ID_2): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="sensor")
+                    ),
                 }
             ),
             errors=errors,
@@ -223,16 +278,35 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
         current_ph_max = float(
             self.config_entry.options.get(CONF_PH_MAX, DEFAULT_PH_MAX)
         )
+        current_ec_entity = self.config_entry.options.get(
+            CONF_EC_ENTITY_ID, DEFAULT_EC_ENTITY_ID
+        )
+        current_ph_entity_2 = self.config_entry.options.get(
+            CONF_PH_ENTITY_ID_2, DEFAULT_PH_ENTITY_ID_2
+        )
+        current_ph_min_2 = float(
+            self.config_entry.options.get(CONF_PH_MIN_2, DEFAULT_PH_MIN_2)
+        )
+        current_ph_max_2 = float(
+            self.config_entry.options.get(CONF_PH_MAX_2, DEFAULT_PH_MAX_2)
+        )
+        current_ec_entity_2 = self.config_entry.options.get(
+            CONF_EC_ENTITY_ID_2, DEFAULT_EC_ENTITY_ID_2
+        )
 
         if user_input is not None:
             default_min = int(user_input[CONF_DEFAULT_DURATION])
             max_min = int(user_input[CONF_MAX_DURATION])
             ph_min = float(user_input.get(CONF_PH_MIN, DEFAULT_PH_MIN))
             ph_max = float(user_input.get(CONF_PH_MAX, DEFAULT_PH_MAX))
+            ph_min_2 = float(user_input.get(CONF_PH_MIN_2, DEFAULT_PH_MIN_2))
+            ph_max_2 = float(user_input.get(CONF_PH_MAX_2, DEFAULT_PH_MAX_2))
             if default_min > max_min:
                 errors["base"] = "default_duration_too_high"
             elif ph_min > ph_max:
                 errors["base"] = "ph_min_too_high"
+            elif ph_min_2 > ph_max_2:
+                errors["base"] = "ph_min_too_high_2"
             else:
                 new_options = {
                     **dict(self.config_entry.options),
@@ -243,10 +317,28 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
                     CONF_RESERVOIR_VOLUME_L: int(
                         user_input[CONF_RESERVOIR_VOLUME_L]
                     ),
-                    CONF_PH_ENTITY_ID: user_input.get(CONF_PH_ENTITY_ID)
-                    or DEFAULT_PH_ENTITY_ID,
+                    # ``.get(key, current)`` (NOT ``or DEFAULT``): the key is
+                    # absent from user_input when the form field was never
+                    # rendered with a value the user touched, and must then
+                    # preserve whatever was already configured -- ``or
+                    # DEFAULT`` would wipe an existing entity to "" any time
+                    # the key is missing, silently disabling the pH/EC gate.
+                    CONF_PH_ENTITY_ID: user_input.get(
+                        CONF_PH_ENTITY_ID, current_ph_entity
+                    ),
                     CONF_PH_MIN: ph_min,
                     CONF_PH_MAX: ph_max,
+                    CONF_EC_ENTITY_ID: user_input.get(
+                        CONF_EC_ENTITY_ID, current_ec_entity
+                    ),
+                    CONF_PH_ENTITY_ID_2: user_input.get(
+                        CONF_PH_ENTITY_ID_2, current_ph_entity_2
+                    ),
+                    CONF_PH_MIN_2: ph_min_2,
+                    CONF_PH_MAX_2: ph_max_2,
+                    CONF_EC_ENTITY_ID_2: user_input.get(
+                        CONF_EC_ENTITY_ID_2, current_ec_entity_2
+                    ),
                 }
                 # Saving options MUST NOT reload the entry (the update listener
                 # only recalculates the next firing).
@@ -330,6 +422,44 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
                             max=PH_SCALE_MAX,
                             step=0.1,
                         )
+                    ),
+                    vol.Optional(
+                        CONF_EC_ENTITY_ID,
+                        description={"suggested_value": current_ec_entity or None},
+                    ): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="sensor")
+                    ),
+                    vol.Optional(
+                        CONF_PH_ENTITY_ID_2,
+                        description={"suggested_value": current_ph_entity_2 or None},
+                    ): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="sensor")
+                    ),
+                    vol.Optional(
+                        CONF_PH_MIN_2, default=current_ph_min_2
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            mode=selector.NumberSelectorMode.BOX,
+                            min=PH_SCALE_MIN,
+                            max=PH_SCALE_MAX,
+                            step=0.1,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_PH_MAX_2, default=current_ph_max_2
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            mode=selector.NumberSelectorMode.BOX,
+                            min=PH_SCALE_MIN,
+                            max=PH_SCALE_MAX,
+                            step=0.1,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_EC_ENTITY_ID_2,
+                        description={"suggested_value": current_ec_entity_2 or None},
+                    ): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="sensor")
                     ),
                 }
             ),

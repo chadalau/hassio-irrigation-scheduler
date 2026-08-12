@@ -17,6 +17,7 @@ import pytest
 import voluptuous as vol
 from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.util import dt as dt_util
 
 from pytest_homeassistant_custom_component.common import async_fire_time_changed_exact
@@ -129,7 +130,7 @@ async def test_set_zone_options_rejects_ph_min_above_ph_max(
     sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
     assert sensor_eid
 
-    with pytest.raises(vol.error.Invalid):
+    with pytest.raises(ServiceValidationError):
         await hass.services.async_call(
             DOMAIN,
             SERVICE_SET_ZONE_OPTIONS,
@@ -140,6 +141,42 @@ async def test_set_zone_options_rejects_ph_min_above_ph_max(
     # Nothing was stored: options are untouched (still the defaults).
     assert scheduler_of(entry).ph_min == 0.0
     assert scheduler_of(entry).ph_max == 14.0
+
+
+async def test_set_zone_options_rejects_partial_update_that_inverts_stored_range(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """REGRESSION (M2): a call that only touches ph_min must be validated
+    against the STORED ph_max, not just fields present in the same call --
+    otherwise ``ph_min=7.0`` alone silently inverts an existing ``5.5..6.5``
+    range into an impossible ``7.0..6.5`` with no visible error, permanently
+    blocking every scheduled run until someone notices the pH warning badge.
+    """
+    entry = await setup_zone(target_entity_id="switch.zone1", name="Garden")
+    sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
+    assert sensor_eid
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_SET_ZONE_OPTIONS,
+        {"entity_id": sensor_eid, CONF_PH_MIN: 5.5, CONF_PH_MAX: 6.5},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    assert scheduler_of(entry).ph_min == 5.5
+    assert scheduler_of(entry).ph_max == 6.5
+
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_ZONE_OPTIONS,
+            {"entity_id": sensor_eid, CONF_PH_MIN: 7.0},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
+    # The previously valid range is untouched.
+    assert scheduler_of(entry).ph_min == 5.5
+    assert scheduler_of(entry).ph_max == 6.5
 
 
 async def test_set_zone_options_rejects_ph_out_of_scale(
@@ -218,7 +255,19 @@ async def test_scheduled_run_skipped_when_ph_outside_range_flags_warning(
     assert "daily-06" in state.attributes["schedule_warnings"]
 
 
-@pytest.mark.parametrize("sensor_state", ["unavailable", "unknown", "not-a-number"])
+@pytest.mark.parametrize(
+    "sensor_state",
+    [
+        "unavailable",
+        "unknown",
+        "not-a-number",
+        "nan",
+        "NaN",
+        "-nan",
+        "inf",
+        "-inf",
+    ],
+)
 async def test_scheduled_run_skipped_when_ph_sensor_unusable(
     hass: HomeAssistant, setup_zone, mock_homeassistant_services, sensor_state
 ) -> None:

@@ -47,6 +47,13 @@ _HOMEASSISTANT_SERVICES = ("homeassistant", "turn_on", "turn_off")
 _VALVE_OFF_STATES = frozenset({"closed", "unavailable", "unknown"})
 _HOMEASSISTANT_OFF_STATES = frozenset({"off", "unavailable", "unknown"})
 
+# States that mean "CONFIRMED off" -- an affirmative report from the device,
+# never ``unavailable``/``unknown``. Used only to decide whether it is safe to
+# discard the restart-recovery safety net; a device that merely stopped
+# reporting is NOT proof the valve closed.
+_VALVE_CONFIRMED_OFF_STATES = frozenset({"closed"})
+_HOMEASSISTANT_CONFIRMED_OFF_STATES = frozenset({"off"})
+
 
 def _parse_schedule_time(value: Any) -> time | None:
     """Parse a schedule ``time`` value: datetime.time or "HH:MM[:SS]"."""
@@ -173,4 +180,19 @@ def off_states(domain: str) -> frozenset[str]:
         return _VALVE_OFF_STATES
     if domain in _HOMEASSISTANT_DOMAINS:
         return _HOMEASSISTANT_OFF_STATES
+    raise ValueError(f"Unsupported target domain: {domain!r}")
+
+
+def confirmed_off_states(domain: str) -> frozenset[str]:
+    """Return the states that mean the target is CONFIRMED off for a domain.
+
+    Stricter than :func:`off_states`: excludes ``unavailable``/``unknown``.
+    A device that stopped reporting is not proof it physically closed, so
+    this must never be used to decide whether it is safe to discard the
+    restart-recovery safety net. Unknown domains raise ``ValueError``.
+    """
+    if domain == "valve":
+        return _VALVE_CONFIRMED_OFF_STATES
+    if domain in _HOMEASSISTANT_DOMAINS:
+        return _HOMEASSISTANT_CONFIRMED_OFF_STATES
     raise ValueError(f"Unsupported target domain: {domain!r}")

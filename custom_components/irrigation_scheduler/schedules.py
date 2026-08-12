@@ -24,7 +24,7 @@ _KEY_ID = "id"
 _KEY_TIME = "time"
 
 
-def _generate_id() -> str:
+def generate_schedule_id() -> str:
     """Generate a short unique schedule id."""
     return uuid.uuid4().hex[:8]
 
@@ -45,7 +45,7 @@ def serialize_schedule(schedule: dict[str, Any]) -> dict[str, Any]:
 def new_schedule(schedule: dict[str, Any]) -> dict[str, Any]:
     """Serialize a NEW schedule, generating its ``id`` only if absent."""
     serialized = serialize_schedule(schedule)
-    serialized.setdefault(_KEY_ID, _generate_id())
+    serialized.setdefault(_KEY_ID, generate_schedule_id())
     return serialized
 
 
