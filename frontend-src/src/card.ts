@@ -77,7 +77,10 @@ export class IrrigationScheduleCard extends LitElement {
   private _formDays: number[] = [];
 
   @state()
-  private _formDuration = 15;
+  private _formDurationMin = 15;
+
+  @state()
+  private _formDurationSec = 0;
 
   @state()
   private _formError = false;
@@ -380,13 +383,28 @@ export class IrrigationScheduleCard extends LitElement {
               </div>
             </div>
             <div class="field">
-              <label>Duração (minutos)</label>
-              <input
-                type="number"
-                min="1"
-                .value=${String(this._formDuration)}
-                @change=${this._onDurationChange}
-              />
+              <label>Duração</label>
+              <div class="duration-row">
+                <div class="duration-part">
+                  <input
+                    type="number"
+                    min="0"
+                    .value=${String(this._formDurationMin)}
+                    @change=${this._onDurationMinChange}
+                  />
+                  <span>min</span>
+                </div>
+                <div class="duration-part">
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    .value=${String(this._formDurationSec)}
+                    @change=${this._onDurationSecChange}
+                  />
+                  <span>seg</span>
+                </div>
+              </div>
             </div>
             ${this._formError
               ? html`
@@ -541,7 +559,8 @@ export class IrrigationScheduleCard extends LitElement {
     this._editingId = null;
     this._formTime = "06:00";
     this._formDays = [];
-    this._formDuration = this._defaultDurationMinutes();
+    this._formDurationMin = this._defaultDurationMinutes();
+    this._formDurationSec = 0;
     this._formError = false;
     this._dialogOpen = true;
   }
@@ -550,7 +569,9 @@ export class IrrigationScheduleCard extends LitElement {
     this._editingId = schedule.id;
     this._formTime = formatTime(schedule.time);
     this._formDays = [...schedule.days];
-    this._formDuration = Math.max(1, Math.round(schedule.duration / 60));
+    const total = Math.max(1, Math.round(schedule.duration));
+    this._formDurationMin = Math.floor(total / 60);
+    this._formDurationSec = total % 60;
     this._formError = false;
     this._dialogOpen = true;
   }
@@ -564,7 +585,7 @@ export class IrrigationScheduleCard extends LitElement {
   private _saveDialog(): void {
     const time = toServiceTime(this._formTime);
     const days = [...this._formDays].sort((a, b) => a - b);
-    const duration = this._formDuration * 60;
+    const duration = this._formDurationMin * 60 + this._formDurationSec;
     if (timeToSeconds(time) < 0 || days.length === 0 || duration <= 0) {
       this._formError = true;
       return;
@@ -596,10 +617,21 @@ export class IrrigationScheduleCard extends LitElement {
     this._formError = false;
   }
 
-  private _onDurationChange(ev: Event): void {
+  private _onDurationMinChange(ev: Event): void {
     const raw = (ev.target as HTMLInputElement).value;
     const parsed = Number.parseInt(raw, 10);
-    this._formDuration = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    this._formDurationMin = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    this._formError = false;
+  }
+
+  private _onDurationSecChange(ev: Event): void {
+    const raw = (ev.target as HTMLInputElement).value;
+    const parsed = Number.parseInt(raw, 10);
+    const clamped =
+      Number.isFinite(parsed) && parsed >= 0
+        ? Math.min(59, parsed)
+        : 0;
+    this._formDurationSec = clamped;
     this._formError = false;
   }
 

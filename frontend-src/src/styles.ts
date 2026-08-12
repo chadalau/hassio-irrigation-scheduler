@@ -248,6 +248,36 @@ export const cardStyles = css`
     justify-content: start;
   }
 
+  .duration-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .duration-part {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+  }
+
+  .duration-part input[type="number"] {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    font-size: 1rem;
+    color: var(--primary-text-color);
+    background: var(--input-fill-color, rgba(0, 0, 0, 0.05));
+    border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
+    border-radius: 6px;
+    color-scheme: dark;
+  }
+
+  .duration-part span {
+    font-size: 0.8rem;
+    color: var(--secondary-text-color);
+    flex-shrink: 0;
+  }
+
   .day-option {
     display: flex;
     flex-direction: column;
