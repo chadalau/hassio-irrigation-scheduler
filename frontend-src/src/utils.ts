@@ -56,6 +56,16 @@ export function dayLabels(locale?: string | null): string[] {
   });
 }
 
+/** Label shown when every day of the week is selected. */
+export function allDaysLabel(locale?: string | null): string {
+  return locale && !locale.toLowerCase().startsWith("pt") ? "All days" : "Todos os dias";
+}
+
+/** True when ``days`` covers Monday..Sunday (all week). */
+export function isAllDays(days: readonly number[]): boolean {
+  return days.length === 7 && days.every((d) => d >= 0 && d <= 6);
+}
+
 /** "15 min" / "1 h 30 min" / "45 s". */
 export function formatDuration(seconds: number): string {
   const safe = Math.max(0, Math.round(Number.isFinite(seconds) ? seconds : 0));
@@ -83,6 +93,31 @@ export function remainingSeconds(finishesAtISO: string, nowIso: string): number 
     return 0;
   }
   return Math.max(0, Math.floor((finish - now) / 1000));
+}
+
+/**
+ * Liters of water a run of ``durationSeconds`` delivers at ``flowLph`` liters
+ * per hour. Returns ``null`` when no flow rate is configured (0 or missing).
+ */
+export function waterVolume(
+  flowLph: number,
+  durationSeconds: number,
+): number | null {
+  const safe = Number.isFinite(flowLph) ? flowLph : 0;
+  if (safe <= 0) {
+    return null;
+  }
+  const duration = Number.isFinite(durationSeconds) ? Math.max(0, durationSeconds) : 0;
+  return (safe / 3600) * duration;
+}
+
+/** "5 L", "0.5 L", "12.34 L". */
+export function formatVolume(liters: number): string {
+  if (!Number.isFinite(liters)) {
+    return "0 L";
+  }
+  const rounded = Math.round(liters * 100) / 100;
+  return `${rounded} L`;
 }
 
 /** "MM:SS"; "H:MM:SS" once the remaining time exceeds one hour. */

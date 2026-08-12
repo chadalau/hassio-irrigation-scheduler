@@ -55,6 +55,7 @@ from .const import (
     ACTUATION_GRACE,
     CONF_DEFAULT_DURATION,
     CONF_ENABLED,
+    CONF_FLOW_RATE_LPH,
     CONF_MAX_DURATION,
     CONF_SCHEDULE_DURATION,
     CONF_SCHEDULE_ID,
@@ -62,6 +63,7 @@ from .const import (
     CONF_TARGET_ENTITY_ID,
     DEFAULT_DEFAULT_DURATION,
     DEFAULT_ENABLED,
+    DEFAULT_FLOW_RATE_LPH,
     DEFAULT_MAX_DURATION,
     DOMAIN,
     MAX_SCHEDULE_DURATION,
@@ -223,6 +225,22 @@ class IrrigationScheduler:
     def max_duration(self) -> int:
         """Maximum watering duration in seconds (watchdog clamp)."""
         return self._duration_option(CONF_MAX_DURATION, DEFAULT_MAX_DURATION)
+
+    @property
+    def flow_rate_lph(self) -> int:
+        """Watering flow rate in liters per hour (0 = unknown/disabled)."""
+        try:
+            value = self.entry.options.get(CONF_FLOW_RATE_LPH, DEFAULT_FLOW_RATE_LPH)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                return value
+        except (TypeError, ValueError):
+            pass
+        _LOGGER.warning(
+            "Invalid flow_rate_lph in options for %s; using default %s",
+            self.entry.entry_id,
+            DEFAULT_FLOW_RATE_LPH,
+        )
+        return DEFAULT_FLOW_RATE_LPH
 
     def _duration_option(self, key: str, default: int) -> int:
         """Return a validated duration option (seconds) or ``default``.

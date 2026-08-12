@@ -1,16 +1,20 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  allDaysLabel,
   dayLabels,
   formatDuration,
   formatRemaining,
   formatTime,
+  formatVolume,
+  isAllDays,
   parseTimeParts,
   progressPct,
   remainingSeconds,
   sanitizeSchedules,
   timeToSeconds,
   toServiceTime,
+  waterVolume,
 } from "../src/utils";
 
 describe("formatTime", () => {
@@ -259,5 +263,51 @@ describe("toServiceTime", () => {
     expect(toServiceTime("24:00")).toBe("24:00");
     expect(toServiceTime("99:99")).toBe("99:99");
     expect(toServiceTime("nope")).toBe("nope");
+  });
+});
+
+describe("waterVolume", () => {
+  it("computes liters from flow rate and duration", () => {
+    // 300 L/h over 60 s -> 5 L; over 3600 s -> 300 L.
+    expect(waterVolume(300, 60)).toBeCloseTo(5);
+    expect(waterVolume(300, 3600)).toBeCloseTo(300);
+    expect(waterVolume(1200, 30)).toBeCloseTo(10);
+  });
+
+  it("returns null when no flow rate is configured", () => {
+    expect(waterVolume(0, 60)).toBeNull();
+    expect(waterVolume(-5, 60)).toBeNull();
+    expect(waterVolume(Number.NaN, 60)).toBeNull();
+  });
+
+  it("handles zero duration", () => {
+    expect(waterVolume(300, 0)).toBe(0);
+  });
+});
+
+describe("formatVolume", () => {
+  it("formats whole and fractional liters", () => {
+    expect(formatVolume(5)).toBe("5 L");
+    expect(formatVolume(0.5)).toBe("0.5 L");
+    expect(formatVolume(12.345)).toBe("12.35 L");
+  });
+
+  it("handles non-finite input", () => {
+    expect(formatVolume(Number.NaN)).toBe("0 L");
+  });
+});
+
+describe("allDaysLabel / isAllDays", () => {
+  it("collapses all seven days into a single label", () => {
+    expect(isAllDays([0, 1, 2, 3, 4, 5, 6])).toBe(true);
+    expect(isAllDays([1, 2, 3, 4, 5, 6, 0])).toBe(true);
+    expect(isAllDays([0, 1, 2, 3, 4, 5])).toBe(false);
+    expect(isAllDays([])).toBe(false);
+  });
+
+  it("labels in Portuguese by default and English otherwise", () => {
+    expect(allDaysLabel("pt-BR")).toBe("Todos os dias");
+    expect(allDaysLabel(undefined)).toBe("Todos os dias");
+    expect(allDaysLabel("en")).toBe("All days");
   });
 });

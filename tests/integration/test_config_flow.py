@@ -10,10 +10,12 @@ from homeassistant.data_entry_flow import FlowResultType
 from custom_components.irrigation_scheduler.const import (
     CONF_DEFAULT_DURATION,
     CONF_ENABLED,
+    CONF_FLOW_RATE_LPH,
     CONF_MAX_DURATION,
     CONF_NAME,
     CONF_SCHEDULES,
     CONF_TARGET_ENTITY_ID,
+    DEFAULT_FLOW_RATE_LPH,
     DEFAULT_MAX_DURATION,
     DOMAIN,
     SERVICE_WATER_NOW,
@@ -38,6 +40,7 @@ async def test_user_step_creates_entry_and_converts_minutes_to_seconds(
             CONF_NAME: "Garden",
             CONF_TARGET_ENTITY_ID: "switch.zone1",
             CONF_DEFAULT_DURATION: 15,  # minutes
+            CONF_FLOW_RATE_LPH: 300,
         },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
@@ -51,6 +54,7 @@ async def test_user_step_creates_entry_and_converts_minutes_to_seconds(
     options = dict(entry.options)
     assert options[CONF_DEFAULT_DURATION] == 15 * 60  # 900 seconds
     assert options[CONF_MAX_DURATION] == DEFAULT_MAX_DURATION
+    assert options[CONF_FLOW_RATE_LPH] == 300
     assert options[CONF_ENABLED] is True
     assert options[CONF_SCHEDULES] == []
 
@@ -68,6 +72,7 @@ async def test_duplicate_target_aborts_with_already_configured(
             CONF_NAME: "Garden",
             CONF_TARGET_ENTITY_ID: "switch.zone1",
             CONF_DEFAULT_DURATION: 15,
+            CONF_FLOW_RATE_LPH: DEFAULT_FLOW_RATE_LPH,
         },
     )
 
@@ -81,6 +86,7 @@ async def test_duplicate_target_aborts_with_already_configured(
             CONF_NAME: "Garden 2",
             CONF_TARGET_ENTITY_ID: "switch.zone1",  # duplicate
             CONF_DEFAULT_DURATION: 15,
+            CONF_FLOW_RATE_LPH: DEFAULT_FLOW_RATE_LPH,
         },
     )
     assert result["type"] == FlowResultType.ABORT
@@ -122,7 +128,11 @@ async def test_options_flow_changes_durations_without_reload_or_interrupt(
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        user_input={CONF_DEFAULT_DURATION: 20, CONF_MAX_DURATION: 30},
+        user_input={
+            CONF_DEFAULT_DURATION: 20,
+            CONF_MAX_DURATION: 30,
+            CONF_FLOW_RATE_LPH: 500,
+        },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
@@ -130,6 +140,7 @@ async def test_options_flow_changes_durations_without_reload_or_interrupt(
     # Durations were updated (minutes -> seconds).
     assert entry.options[CONF_DEFAULT_DURATION] == 20 * 60
     assert entry.options[CONF_MAX_DURATION] == 30 * 60
+    assert entry.options[CONF_FLOW_RATE_LPH] == 500
 
     # The entry was NOT reloaded: the exact same scheduler instance lives on.
     assert entry.runtime_data is scheduler_before

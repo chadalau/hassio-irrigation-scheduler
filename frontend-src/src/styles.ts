@@ -149,10 +149,23 @@ export const cardStyles = css`
     color: var(--secondary-text-color);
   }
 
+  .day-chip.all-days {
+    font-weight: 500;
+    background: var(--primary-color, #03a9f4);
+    color: var(--text-primary-color, #fff);
+  }
+
   .schedule-duration {
     font-size: 0.85rem;
     color: var(--secondary-text-color);
     white-space: nowrap;
+  }
+
+  .schedule-volume {
+    font-size: 0.75rem;
+    color: var(--primary-color, #03a9f4);
+    font-weight: 500;
+    margin-left: 6px;
   }
 
   .schedule-actions {

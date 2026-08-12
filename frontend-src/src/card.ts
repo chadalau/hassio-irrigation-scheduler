@@ -12,15 +12,19 @@ import {
 import { IrrigationScheduleCardEditor } from "./editor";
 import { cardStyles } from "./styles";
 import {
+  allDaysLabel,
   dayLabels,
   formatDuration,
   formatRemaining,
   formatTime,
+  formatVolume,
+  isAllDays,
   progressPct,
   remainingSeconds,
   sanitizeSchedules,
   timeToSeconds,
   toServiceTime,
+  waterVolume,
 } from "./utils";
 import type {
   CardConfig,
@@ -185,6 +189,7 @@ export class IrrigationScheduleCard extends LitElement {
     const labels = dayLabels(locale);
     const schedules = sanitizeSchedules(sensor.attributes.schedules);
     const defaultDuration = this._numberAttr(sensor, "default_duration") ?? 0;
+    const flowRate = this._numberAttr(sensor, "flow_rate_lph") ?? 0;
     const switchEntity = this._switchEid
       ? this.hass?.states[this._switchEid]
       : undefined;
@@ -213,10 +218,7 @@ export class IrrigationScheduleCard extends LitElement {
     const progress =
       startedAt && finishesAt ? progressPct(finishesAt, startedAt, nowIso) : 0;
 
-    const waterNowLabel =
-      defaultDuration > 0
-        ? `Regar agora por ${formatDuration(defaultDuration)}`
-        : "Regar agora";
+    const waterNowLabel = this._waterNowLabel(defaultDuration, flowRate);
 
     return html`
       <ha-card class=${compact ? "compact" : ""}>
@@ -280,7 +282,7 @@ export class IrrigationScheduleCard extends LitElement {
             ${schedules.length === 0
               ? html`<div class="empty">Nenhum horário configurado.</div>`
               : schedules.map((schedule) =>
-                  this._renderScheduleRow(schedule, labels),
+                  this._renderScheduleRow(schedule, labels, locale, flowRate),
                 )}
           </div>
 
@@ -308,17 +310,28 @@ export class IrrigationScheduleCard extends LitElement {
     `;
   }
 
-  private _renderScheduleRow(schedule: Schedule, labels: string[]): TemplateResult {
+  private _renderScheduleRow(
+    schedule: Schedule,
+    labels: string[],
+    locale: string,
+    flowRate: number,
+  ): TemplateResult {
+    const volume = waterVolume(flowRate, schedule.duration);
     return html`
       <div class="schedule-row">
         <div class="schedule-time">${formatTime(schedule.time)}</div>
         <div class="schedule-days">
-          ${schedule.days.map(
-            (day) => html`<span class="day-chip">${labels[day] ?? ""}</span>`,
-          )}
+          ${isAllDays(schedule.days)
+            ? html`<span class="day-chip all-days">${allDaysLabel(locale)}</span>`
+            : schedule.days.map(
+                (day) => html`<span class="day-chip">${labels[day] ?? ""}</span>`,
+              )}
         </div>
         <div class="schedule-duration">
           ${formatDuration(schedule.duration)}
+          ${volume !== null
+            ? html`<span class="schedule-volume">≈ ${formatVolume(volume)}</span>`
+            : ""}
         </div>
         <ha-switch
           ?checked=${schedule.enabled}
@@ -340,6 +353,15 @@ export class IrrigationScheduleCard extends LitElement {
         </div>
       </div>
     `;
+  }
+
+  private _waterNowLabel(defaultDuration: number, flowRate: number): string {
+    if (defaultDuration <= 0) {
+      return "Regar agora";
+    }
+    const label = `Regar agora por ${formatDuration(defaultDuration)}`;
+    const volume = waterVolume(flowRate, defaultDuration);
+    return volume !== null ? `${label} (≈ ${formatVolume(volume)})` : label;
   }
 
   private _renderDialog(labels: string[]): TemplateResult {

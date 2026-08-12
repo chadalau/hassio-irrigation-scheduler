@@ -68,6 +68,7 @@ class IrrigationSchedulerSensor(SensorEntity):
             "target_entity_id": self._scheduler.target_entity_id,
             "default_duration": self._scheduler.default_duration,
             "max_duration": self._scheduler.max_duration,
+            "flow_rate_lph": self._scheduler.flow_rate_lph,
             "switch_entity_id": self._switch_entity_id,
             "binary_sensor_entity_id": self._binary_sensor_entity_id,
         }

@@ -7,7 +7,8 @@
         "data": {
           "name": "Zone name",
           "target_entity_id": "Target entity",
-          "default_duration": "Default duration (minutes)"
+          "default_duration": "Default duration (minutes)",
+          "flow_rate_lph": "Flow rate (L/h)"
         }
       }
     },
@@ -25,7 +26,8 @@
         "description": "Adjust the watering durations for this zone.",
         "data": {
           "default_duration": "Default duration (minutes)",
-          "max_duration": "Max duration (minutes)"
+          "max_duration": "Max duration (minutes)",
+          "flow_rate_lph": "Flow rate (L/h)"
         }
       }
     },

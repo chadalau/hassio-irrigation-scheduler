@@ -94,6 +94,7 @@ async def test_sensor_attribute_contract_has_all_keys_and_sibling_ids(
         "target_entity_id",
         "default_duration",
         "max_duration",
+        "flow_rate_lph",
         "switch_entity_id",
         "binary_sensor_entity_id",
     }
@@ -106,6 +107,7 @@ async def test_sensor_attribute_contract_has_all_keys_and_sibling_ids(
     assert state.attributes["target_entity_id"] == "switch.zone1"
     assert state.attributes["default_duration"] == 600
     assert state.attributes["max_duration"] == 7200
+    assert state.attributes["flow_rate_lph"] == 0
     assert state.attributes["schedules"] == []
 
 

@@ -7,7 +7,8 @@
         "data": {
           "name": "Nome da zona",
           "target_entity_id": "Entidade alvo",
-          "default_duration": "Duração padrão (minutos)"
+          "default_duration": "Duração padrão (minutos)",
+          "flow_rate_lph": "Vazão (L/h)"
         }
       }
     },
@@ -25,7 +26,8 @@
         "description": "Ajuste as durações de irrigação desta zona.",
         "data": {
           "default_duration": "Duração padrão (minutos)",
-          "max_duration": "Duração máxima (minutos)"
+          "max_duration": "Duração máxima (minutos)",
+          "flow_rate_lph": "Vazão (L/h)"
         }
       }
     },

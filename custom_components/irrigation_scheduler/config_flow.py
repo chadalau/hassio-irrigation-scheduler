@@ -13,11 +13,13 @@ from homeassistant.helpers import selector
 from .const import (
     CONF_DEFAULT_DURATION,
     CONF_ENABLED,
+    CONF_FLOW_RATE_LPH,
     CONF_MAX_DURATION,
     CONF_NAME,
     CONF_SCHEDULES,
     CONF_TARGET_ENTITY_ID,
     DEFAULT_DEFAULT_DURATION,
+    DEFAULT_FLOW_RATE_LPH,
     DEFAULT_MAX_DURATION,
     DOMAIN,
 )
@@ -47,6 +49,7 @@ class IrrigationSchedulerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._abort_if_unique_id_configured()
 
             default_duration = int(user_input[CONF_DEFAULT_DURATION]) * 60
+            flow_rate = int(user_input[CONF_FLOW_RATE_LPH])
 
             return self.async_create_entry(
                 title=user_input[CONF_NAME],
@@ -58,6 +61,7 @@ class IrrigationSchedulerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_ENABLED: True,
                     CONF_DEFAULT_DURATION: default_duration,
                     CONF_MAX_DURATION: DEFAULT_MAX_DURATION,
+                    CONF_FLOW_RATE_LPH: flow_rate,
                     CONF_SCHEDULES: [],
                 },
             )
@@ -78,6 +82,16 @@ class IrrigationSchedulerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             min=1,
                             max=MAX_DURATION_MINUTES,
                             unit_of_measurement="min",
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_FLOW_RATE_LPH, default=DEFAULT_FLOW_RATE_LPH
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            mode=selector.NumberSelectorMode.BOX,
+                            min=0,
+                            max=100000,
+                            unit_of_measurement="L/h",
                         )
                     ),
                 }
@@ -118,6 +132,11 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
             int(self.config_entry.options.get(CONF_MAX_DURATION, DEFAULT_MAX_DURATION))
             // 60
         )
+        current_flow = int(
+            self.config_entry.options.get(
+                CONF_FLOW_RATE_LPH, DEFAULT_FLOW_RATE_LPH
+            )
+        )
 
         if user_input is not None:
             default_min = int(user_input[CONF_DEFAULT_DURATION])
@@ -129,6 +148,7 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
                     **dict(self.config_entry.options),
                     CONF_DEFAULT_DURATION: default_min * 60,
                     CONF_MAX_DURATION: max_min * 60,
+                    CONF_FLOW_RATE_LPH: int(user_input[CONF_FLOW_RATE_LPH]),
                 }
                 # Saving options MUST NOT reload the entry (the update listener
                 # only recalculates the next firing).
@@ -156,6 +176,16 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
                             min=1,
                             max=1440,
                             unit_of_measurement="min",
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_FLOW_RATE_LPH, default=current_flow
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            mode=selector.NumberSelectorMode.BOX,
+                            min=0,
+                            max=100000,
+                            unit_of_measurement="L/h",
                         )
                     ),
                 }
