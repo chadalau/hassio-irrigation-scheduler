@@ -228,10 +228,11 @@ export class IrrigationScheduleCard extends LitElement {
             <span class="status ${statusClass}">${statusText}</span>
             ${switchEntity
               ? html`
-                  <ha-entity-toggle
-                    .hass=${this.hass}
-                    .entity=${switchEntity}
-                  ></ha-entity-toggle>
+                  <ha-switch
+                    .checked=${switchOn}
+                    title=${switchOn ? "Agendamento ativo" : "Agendamento desativado"}
+                    @change=${(ev: Event) => this._toggleMaster(switchEntity, ev)}
+                  ></ha-switch>
                 `
               : html`<ha-switch disabled></ha-switch>`}
           </div>
@@ -534,6 +535,26 @@ export class IrrigationScheduleCard extends LitElement {
 
   private _waterNow(): void {
     this._callService("water_now");
+  }
+
+  private _toggleMaster(entity: HassEntity, ev: Event): void {
+    const checked = (ev.target as CheckableElement).checked;
+    if (!this.hass) {
+      return;
+    }
+    void this.hass
+      .callService(
+        "switch",
+        checked ? "turn_on" : "turn_off",
+        {},
+        { entity_id: entity.entity_id },
+      )
+      .catch((error: unknown) => {
+        console.error(
+          "[irrigation-schedule-card] switch toggle failed",
+          error,
+        );
+      });
   }
 
   private _stopWatering(): void {
