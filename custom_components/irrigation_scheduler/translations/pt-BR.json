@@ -9,7 +9,8 @@
           "target_entity_id": "Entidade alvo",
           "default_duration": "Duração padrão (minutos)",
           "flow_rate_lph": "Vazão (L/h)",
-          "number_of_pots": "Número de vasos (opcional)"
+          "number_of_pots": "Número de vasos (opcional)",
+          "reservoir_volume_l": "Volume do reservatório (L, opcional)"
         }
       }
     },
@@ -29,7 +30,8 @@
           "default_duration": "Duração padrão (minutos)",
           "max_duration": "Duração máxima (minutos)",
           "flow_rate_lph": "Vazão (L/h)",
-          "number_of_pots": "Número de vasos (opcional)"
+          "number_of_pots": "Número de vasos (opcional)",
+          "reservoir_volume_l": "Volume do reservatório (L, opcional)"
         }
       }
     },
@@ -135,6 +137,24 @@
         "schedules": {
           "name": "Agendamentos",
           "description": "Lista completa de agendamentos a serem definidos."
+        }
+      }
+    },
+    "set_zone_options": {
+      "name": "Definir opções da zona",
+      "description": "Atualize opções opcionais da zona (vazão, número de vasos e volume do reservatório).",
+      "fields": {
+        "flow_rate_lph": {
+          "name": "Vazão",
+          "description": "Vazão da irrigação em litros por hora."
+        },
+        "number_of_pots": {
+          "name": "Número de vasos",
+          "description": "Número de vasos irrigados pela zona (usado no cálculo por vaso)."
+        },
+        "reservoir_volume_l": {
+          "name": "Volume do reservatório",
+          "description": "Volume de água do reservatório em litros."
         }
       }
     }

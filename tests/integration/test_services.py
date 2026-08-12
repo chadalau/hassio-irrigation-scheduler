@@ -20,6 +20,7 @@ from custom_components.irrigation_scheduler.const import (
     CONF_FLOW_RATE_LPH,
     CONF_MAX_DURATION,
     CONF_NUMBER_OF_POTS,
+    CONF_RESERVOIR_VOLUME_L,
     CONF_SCHEDULES,
     DOMAIN,
     SERVICE_SET_SCHEDULES,
@@ -350,6 +351,7 @@ async def test_set_zone_options_updates_flow_rate_and_pots(hass: HomeAssistant, 
             "entity_id": sensor_eid,
             CONF_FLOW_RATE_LPH: 300,
             CONF_NUMBER_OF_POTS: 12,
+            CONF_RESERVOIR_VOLUME_L: 1000,
         },
         blocking=True,
     )
@@ -357,6 +359,7 @@ async def test_set_zone_options_updates_flow_rate_and_pots(hass: HomeAssistant, 
 
     assert entry.options[CONF_FLOW_RATE_LPH] == 300
     assert entry.options[CONF_NUMBER_OF_POTS] == 12
+    assert entry.options[CONF_RESERVOIR_VOLUME_L] == 1000
     # The entry was NOT reloaded: the same scheduler instance lives on.
     assert scheduler_of(entry) is scheduler_before
 
@@ -365,6 +368,7 @@ async def test_set_zone_options_updates_flow_rate_and_pots(hass: HomeAssistant, 
     assert state is not None
     assert state.attributes[CONF_FLOW_RATE_LPH] == 300
     assert state.attributes[CONF_NUMBER_OF_POTS] == 12
+    assert state.attributes[CONF_RESERVOIR_VOLUME_L] == 1000
 
 
 async def test_set_zone_options_rejects_negative(hass: HomeAssistant, setup_zone) -> None:

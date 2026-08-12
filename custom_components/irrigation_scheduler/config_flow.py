@@ -17,12 +17,14 @@ from .const import (
     CONF_MAX_DURATION,
     CONF_NAME,
     CONF_NUMBER_OF_POTS,
+    CONF_RESERVOIR_VOLUME_L,
     CONF_SCHEDULES,
     CONF_TARGET_ENTITY_ID,
     DEFAULT_DEFAULT_DURATION,
     DEFAULT_FLOW_RATE_LPH,
     DEFAULT_MAX_DURATION,
     DEFAULT_NUMBER_OF_POTS,
+    DEFAULT_RESERVOIR_VOLUME_L,
     DOMAIN,
 )
 
@@ -53,6 +55,7 @@ class IrrigationSchedulerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             default_duration = int(user_input[CONF_DEFAULT_DURATION]) * 60
             flow_rate = int(user_input[CONF_FLOW_RATE_LPH])
             number_of_pots = int(user_input[CONF_NUMBER_OF_POTS])
+            reservoir_volume = int(user_input[CONF_RESERVOIR_VOLUME_L])
 
             return self.async_create_entry(
                 title=user_input[CONF_NAME],
@@ -66,6 +69,7 @@ class IrrigationSchedulerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_MAX_DURATION: DEFAULT_MAX_DURATION,
                     CONF_FLOW_RATE_LPH: flow_rate,
                     CONF_NUMBER_OF_POTS: number_of_pots,
+                    CONF_RESERVOIR_VOLUME_L: reservoir_volume,
                     CONF_SCHEDULES: [],
                 },
             )
@@ -105,6 +109,16 @@ class IrrigationSchedulerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             mode=selector.NumberSelectorMode.BOX,
                             min=0,
                             max=100000,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_RESERVOIR_VOLUME_L, default=DEFAULT_RESERVOIR_VOLUME_L
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            mode=selector.NumberSelectorMode.BOX,
+                            min=0,
+                            max=100000,
+                            unit_of_measurement="L",
                         )
                     ),
                 }
@@ -155,6 +169,11 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
                 CONF_NUMBER_OF_POTS, DEFAULT_NUMBER_OF_POTS
             )
         )
+        current_reservoir = int(
+            self.config_entry.options.get(
+                CONF_RESERVOIR_VOLUME_L, DEFAULT_RESERVOIR_VOLUME_L
+            )
+        )
 
         if user_input is not None:
             default_min = int(user_input[CONF_DEFAULT_DURATION])
@@ -168,6 +187,9 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
                     CONF_MAX_DURATION: max_min * 60,
                     CONF_FLOW_RATE_LPH: int(user_input[CONF_FLOW_RATE_LPH]),
                     CONF_NUMBER_OF_POTS: int(user_input[CONF_NUMBER_OF_POTS]),
+                    CONF_RESERVOIR_VOLUME_L: int(
+                        user_input[CONF_RESERVOIR_VOLUME_L]
+                    ),
                 }
                 # Saving options MUST NOT reload the entry (the update listener
                 # only recalculates the next firing).
@@ -214,6 +236,16 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
                             mode=selector.NumberSelectorMode.BOX,
                             min=0,
                             max=100000,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_RESERVOIR_VOLUME_L, default=current_reservoir
+                    ): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            mode=selector.NumberSelectorMode.BOX,
+                            min=0,
+                            max=100000,
+                            unit_of_measurement="L",
                         )
                     ),
                 }

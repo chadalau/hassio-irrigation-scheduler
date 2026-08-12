@@ -14,11 +14,13 @@ from custom_components.irrigation_scheduler.const import (
     CONF_MAX_DURATION,
     CONF_NAME,
     CONF_NUMBER_OF_POTS,
+    CONF_RESERVOIR_VOLUME_L,
     CONF_SCHEDULES,
     CONF_TARGET_ENTITY_ID,
     DEFAULT_FLOW_RATE_LPH,
     DEFAULT_MAX_DURATION,
     DEFAULT_NUMBER_OF_POTS,
+    DEFAULT_RESERVOIR_VOLUME_L,
     DOMAIN,
     SERVICE_WATER_NOW,
 )
@@ -44,6 +46,7 @@ async def test_user_step_creates_entry_and_converts_minutes_to_seconds(
             CONF_DEFAULT_DURATION: 15,  # minutes
             CONF_FLOW_RATE_LPH: 300,
             CONF_NUMBER_OF_POTS: 12,
+            CONF_RESERVOIR_VOLUME_L: 1000,
         },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
@@ -59,6 +62,7 @@ async def test_user_step_creates_entry_and_converts_minutes_to_seconds(
     assert options[CONF_MAX_DURATION] == DEFAULT_MAX_DURATION
     assert options[CONF_FLOW_RATE_LPH] == 300
     assert options[CONF_NUMBER_OF_POTS] == 12
+    assert options[CONF_RESERVOIR_VOLUME_L] == 1000
     assert options[CONF_ENABLED] is True
     assert options[CONF_SCHEDULES] == []
 
@@ -78,6 +82,7 @@ async def test_duplicate_target_aborts_with_already_configured(
             CONF_DEFAULT_DURATION: 15,
             CONF_FLOW_RATE_LPH: DEFAULT_FLOW_RATE_LPH,
             CONF_NUMBER_OF_POTS: DEFAULT_NUMBER_OF_POTS,
+            CONF_RESERVOIR_VOLUME_L: DEFAULT_RESERVOIR_VOLUME_L,
         },
     )
 
@@ -93,6 +98,7 @@ async def test_duplicate_target_aborts_with_already_configured(
             CONF_DEFAULT_DURATION: 15,
             CONF_FLOW_RATE_LPH: DEFAULT_FLOW_RATE_LPH,
             CONF_NUMBER_OF_POTS: DEFAULT_NUMBER_OF_POTS,
+            CONF_RESERVOIR_VOLUME_L: DEFAULT_RESERVOIR_VOLUME_L,
         },
     )
     assert result["type"] == FlowResultType.ABORT
@@ -139,6 +145,7 @@ async def test_options_flow_changes_durations_without_reload_or_interrupt(
             CONF_MAX_DURATION: 30,
             CONF_FLOW_RATE_LPH: 500,
             CONF_NUMBER_OF_POTS: 20,
+            CONF_RESERVOIR_VOLUME_L: 2000,
         },
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
@@ -149,6 +156,7 @@ async def test_options_flow_changes_durations_without_reload_or_interrupt(
     assert entry.options[CONF_MAX_DURATION] == 30 * 60
     assert entry.options[CONF_FLOW_RATE_LPH] == 500
     assert entry.options[CONF_NUMBER_OF_POTS] == 20
+    assert entry.options[CONF_RESERVOIR_VOLUME_L] == 2000
 
     # The entry was NOT reloaded: the exact same scheduler instance lives on.
     assert entry.runtime_data is scheduler_before

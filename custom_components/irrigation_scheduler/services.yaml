@@ -180,3 +180,12 @@ set_zone_options:
           min: 0
           max: 100000
           mode: box
+    reservoir_volume_l:
+      name: Reservoir volume
+      description: Water reservoir volume in liters.
+      selector:
+        number:
+          min: 0
+          max: 100000
+          unit_of_measurement: L
+          mode: box

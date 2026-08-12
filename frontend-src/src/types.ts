@@ -67,6 +67,7 @@ export interface NextRunAttributes extends Record<string, unknown> {
   max_duration?: number;
   flow_rate_lph?: number;
   number_of_pots?: number;
+  reservoir_volume_l?: number;
   switch_entity_id?: string;
   binary_sensor_entity_id?: string;
 }

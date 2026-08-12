@@ -9,7 +9,8 @@
           "target_entity_id": "Target entity",
           "default_duration": "Default duration (minutes)",
           "flow_rate_lph": "Flow rate (L/h)",
-          "number_of_pots": "Number of pots (optional)"
+          "number_of_pots": "Number of pots (optional)",
+          "reservoir_volume_l": "Reservoir volume (L, optional)"
         }
       }
     },
@@ -29,7 +30,8 @@
           "default_duration": "Default duration (minutes)",
           "max_duration": "Max duration (minutes)",
           "flow_rate_lph": "Flow rate (L/h)",
-          "number_of_pots": "Number of pots (optional)"
+          "number_of_pots": "Number of pots (optional)",
+          "reservoir_volume_l": "Reservoir volume (L, optional)"
         }
       }
     },
@@ -135,6 +137,24 @@
         "schedules": {
           "name": "Schedules",
           "description": "Full list of schedules to set."
+        }
+      }
+    },
+    "set_zone_options": {
+      "name": "Set zone options",
+      "description": "Update optional zone settings (flow rate, number of pots and reservoir volume).",
+      "fields": {
+        "flow_rate_lph": {
+          "name": "Flow rate",
+          "description": "Watering flow rate in liters per hour."
+        },
+        "number_of_pots": {
+          "name": "Number of pots",
+          "description": "Number of pots watered by the zone (used for per-pot volume)."
+        },
+        "reservoir_volume_l": {
+          "name": "Reservoir volume",
+          "description": "Water reservoir volume in liters."
         }
       }
     }

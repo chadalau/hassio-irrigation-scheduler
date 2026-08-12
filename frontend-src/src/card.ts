@@ -82,6 +82,9 @@ export class IrrigationScheduleCard extends LitElement {
   private _settingsPots = "";
 
   @state()
+  private _settingsReservoir = "";
+
+  @state()
   private _editingId: string | null = null;
 
   @state()
@@ -201,6 +204,7 @@ export class IrrigationScheduleCard extends LitElement {
     const defaultDuration = this._numberAttr(sensor, "default_duration") ?? 0;
     const flowRate = this._numberAttr(sensor, "flow_rate_lph") ?? 0;
     const numberOfPots = this._numberAttr(sensor, "number_of_pots") ?? 0;
+    const reservoirVolume = this._numberAttr(sensor, "reservoir_volume_l") ?? 0;
     const switchEntity = this._switchEid
       ? this.hass?.states[this._switchEid]
       : undefined;
@@ -257,7 +261,7 @@ export class IrrigationScheduleCard extends LitElement {
           </div>
         </div>
 
-        ${this._renderSettings(flowRate, numberOfPots)}
+        ${this._renderSettings(flowRate, numberOfPots, reservoirVolume)}
 
         ${wateringOn && finishesAt
           ? html`
@@ -398,7 +402,11 @@ export class IrrigationScheduleCard extends LitElement {
       : `${label} (≈ ${formatMl(total)})`;
   }
 
-  private _renderSettings(flowRate: number, numberOfPots: number): TemplateResult {
+  private _renderSettings(
+    flowRate: number,
+    numberOfPots: number,
+    reservoirVolume: number,
+  ): TemplateResult {
     if (!this._settingsOpen) {
       return html``;
     }
@@ -422,6 +430,15 @@ export class IrrigationScheduleCard extends LitElement {
             @change=${this._onSettingsPotsChange}
           />
         </div>
+        <div class="field">
+          <label>Volume do reservatório (L)</label>
+          <input
+            type="number"
+            min="0"
+            .value=${this._settingsReservoir || String(reservoirVolume)}
+            @change=${this._onSettingsReservoirChange}
+          />
+        </div>
         <div class="settings-actions">
           <button class="dialog-cancel" @click=${this._closeSettings}>
             Fechar
@@ -440,6 +457,7 @@ export class IrrigationScheduleCard extends LitElement {
     this._settingsOpen = false;
     this._settingsFlow = "";
     this._settingsPots = "";
+    this._settingsReservoir = "";
   }
 
   private _onSettingsFlowChange(ev: Event): void {
@@ -450,15 +468,23 @@ export class IrrigationScheduleCard extends LitElement {
     this._settingsPots = (ev.target as HTMLInputElement).value;
   }
 
+  private _onSettingsReservoirChange(ev: Event): void {
+    this._settingsReservoir = (ev.target as HTMLInputElement).value;
+  }
+
   private _saveSettings(): void {
     const flow = Number.parseInt(this._settingsFlow, 10);
     const pots = Number.parseInt(this._settingsPots, 10);
+    const reservoir = Number.parseInt(this._settingsReservoir, 10);
     const data: Record<string, unknown> = {};
     if (Number.isFinite(flow) && flow >= 0) {
       data.flow_rate_lph = flow;
     }
     if (Number.isFinite(pots) && pots >= 0) {
       data.number_of_pots = pots;
+    }
+    if (Number.isFinite(reservoir) && reservoir >= 0) {
+      data.reservoir_volume_l = reservoir;
     }
     this._callService("set_zone_options", data);
     this._closeSettings();

@@ -58,6 +58,7 @@ from .const import (
     CONF_FLOW_RATE_LPH,
     CONF_MAX_DURATION,
     CONF_NUMBER_OF_POTS,
+    CONF_RESERVOIR_VOLUME_L,
     CONF_SCHEDULE_DURATION,
     CONF_SCHEDULE_ID,
     CONF_SCHEDULES,
@@ -67,6 +68,7 @@ from .const import (
     DEFAULT_FLOW_RATE_LPH,
     DEFAULT_MAX_DURATION,
     DEFAULT_NUMBER_OF_POTS,
+    DEFAULT_RESERVOIR_VOLUME_L,
     DOMAIN,
     MAX_SCHEDULE_DURATION,
     MIN_DURATION,
@@ -260,6 +262,24 @@ class IrrigationScheduler:
         )
         return DEFAULT_NUMBER_OF_POTS
 
+    @property
+    def reservoir_volume_l(self) -> int:
+        """Water reservoir volume in liters (0 = not configured)."""
+        try:
+            value = self.entry.options.get(
+                CONF_RESERVOIR_VOLUME_L, DEFAULT_RESERVOIR_VOLUME_L
+            )
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                return value
+        except (TypeError, ValueError):
+            pass
+        _LOGGER.warning(
+            "Invalid reservoir_volume_l in options for %s; using default %s",
+            self.entry.entry_id,
+            DEFAULT_RESERVOIR_VOLUME_L,
+        )
+        return DEFAULT_RESERVOIR_VOLUME_L
+
     def _duration_option(self, key: str, default: int) -> int:
         """Return a validated duration option (seconds) or ``default``.
 
@@ -339,8 +359,9 @@ class IrrigationScheduler:
         *,
         flow_rate_lph: int | None = None,
         number_of_pots: int | None = None,
+        reservoir_volume_l: int | None = None,
     ) -> None:
-        """Update optional zone settings (flow rate / number of pots).
+        """Update optional zone settings (flow rate / pots / reservoir volume).
 
         Only the fields that are not ``None`` are changed; the rest of the
         options are preserved. The entry is NOT reloaded (the update listener
@@ -351,6 +372,8 @@ class IrrigationScheduler:
             options[CONF_FLOW_RATE_LPH] = flow_rate_lph
         if number_of_pots is not None:
             options[CONF_NUMBER_OF_POTS] = number_of_pots
+        if reservoir_volume_l is not None:
+            options[CONF_RESERVOIR_VOLUME_L] = reservoir_volume_l
         self.hass.config_entries.async_update_entry(self.entry, options=options)
 
     async def async_add_schedule(self, schedule: dict[str, Any]) -> None:

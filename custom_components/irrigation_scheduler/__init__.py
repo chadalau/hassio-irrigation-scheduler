@@ -40,6 +40,7 @@ from .const import (
     CONF_SCHEDULES,
     CONF_FLOW_RATE_LPH,
     CONF_NUMBER_OF_POTS,
+    CONF_RESERVOIR_VOLUME_L,
     DOMAIN,
     MAX_SCHEDULE_DURATION,
     MIN_DURATION,
@@ -120,6 +121,9 @@ SET_ZONE_OPTIONS_SCHEMA = vol.Schema(
             vol.Coerce(int), vol.Range(min=0, max=100000)
         ),
         vol.Optional(CONF_NUMBER_OF_POTS): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=100000)
+        ),
+        vol.Optional(CONF_RESERVOIR_VOLUME_L): vol.All(
             vol.Coerce(int), vol.Range(min=0, max=100000)
         ),
     }
@@ -351,6 +355,7 @@ async def _async_register_services(hass: HomeAssistant) -> None:
             await scheduler.async_set_zone_options(
                 flow_rate_lph=data.get(CONF_FLOW_RATE_LPH),
                 number_of_pots=data.get(CONF_NUMBER_OF_POTS),
+                reservoir_volume_l=data.get(CONF_RESERVOIR_VOLUME_L),
             )
         return None
 
