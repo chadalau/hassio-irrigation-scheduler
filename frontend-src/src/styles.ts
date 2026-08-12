@@ -120,12 +120,19 @@ export const cardStyles = css`
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 8px 0;
+    padding: 6px 0;
     border-bottom: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
   }
 
   .schedule-row:last-child {
     border-bottom: none;
+  }
+
+  .schedule-row ha-switch {
+    --mdc-switch-track-height: 20px;
+    --mdc-switch-track-width: 36px;
+    --mdc-switch-state-layer-size: 26px;
+    flex-shrink: 0;
   }
 
   .schedule-time {
@@ -205,6 +212,11 @@ export const cardStyles = css`
     align-items: center;
   }
 
+  .schedule-actions ha-icon-button {
+    --mdc-icon-button-size: 30px;
+    --mdc-icon-size: 16px;
+  }
+
   .empty {
     padding: 16px 0;
     text-align: center;
@@ -219,6 +231,11 @@ export const cardStyles = css`
     gap: 8px;
     margin-top: 12px;
     flex-wrap: wrap;
+  }
+
+  .actions ha-button {
+    --mdc-button-height: 30px;
+    --mdc-typography-button-font-size: 0.8rem;
   }
 
   .config-error {

@@ -96,8 +96,9 @@ export function remainingSeconds(finishesAtISO: string, nowIso: string): number 
 }
 
 /**
- * Liters of water a run of ``durationSeconds`` delivers at ``flowLph`` liters
- * per hour. Returns ``null`` when no flow rate is configured (0 or missing).
+ * Liters a run of ``durationSeconds`` delivers to ONE pot at ``flowLph``
+ * liters per hour. ``flowLph`` is the flow rate PER POT. Returns ``null`` when
+ * no flow rate is configured (0 or missing).
  */
 export function waterVolume(
   flowLph: number,
@@ -121,20 +122,34 @@ export function formatVolume(liters: number): string {
 }
 
 /**
- * Milliliters delivered to each pot for a run, given the flow rate (L/h), the
- * run duration (s) and the number of pots. Returns ``null`` when the flow rate
- * or the number of pots is not configured (0 or missing).
+ * Milliliters delivered to ONE pot for a run. ``flowLph`` is the flow rate
+ * PER POT; the number of pots does not change what a single pot receives.
+ * Returns ``null`` when no flow rate is configured.
  */
-export function waterPerPotMl(
+export function perPotVolumeMl(
+  flowLph: number,
+  durationSeconds: number,
+): number | null {
+  const liters = waterVolume(flowLph, durationSeconds);
+  return liters === null ? null : liters * 1000;
+}
+
+/**
+ * Total milliliters delivered to all pots for a run, i.e. per-pot volume
+ * times the number of pots. When ``pots`` is not configured (0 or missing),
+ * the total equals the per-pot volume.
+ */
+export function totalVolumeMl(
   flowLph: number,
   durationSeconds: number,
   pots: number,
 ): number | null {
-  const total = waterVolume(flowLph, durationSeconds);
-  if (total === null || !Number.isFinite(pots) || pots <= 0) {
+  const perPot = perPotVolumeMl(flowLph, durationSeconds);
+  if (perPot === null) {
     return null;
   }
-  return (total * 1000) / pots;
+  const count = Number.isFinite(pots) && pots > 0 ? pots : 1;
+  return perPot * count;
 }
 
 /** "417 ml", "1.2 L" (liters when >= 1000 ml). */

@@ -10,12 +10,13 @@ import {
   formatVolume,
   isAllDays,
   parseTimeParts,
+  perPotVolumeMl,
   progressPct,
   remainingSeconds,
   sanitizeSchedules,
   timeToSeconds,
   toServiceTime,
-  waterPerPotMl,
+  totalVolumeMl,
   waterVolume,
 } from "../src/utils";
 
@@ -299,18 +300,23 @@ describe("formatVolume", () => {
   });
 });
 
-describe("waterPerPotMl / formatMl", () => {
-  it("computes ml per pot from flow, duration and pots", () => {
-    // 300 L/h over 60 s = 5 L total across 12 pots -> 416.67 ml/pot.
-    expect(waterPerPotMl(300, 60, 12)).toBeCloseTo(416.67, 1);
-    // 1200 L/h over 30 s = 10 L across 20 pots -> 500 ml.
-    expect(waterPerPotMl(1200, 30, 20)).toBeCloseTo(500);
+describe("perPotVolumeMl / totalVolumeMl / formatMl", () => {
+  it("flow applies per pot; total = per-pot volume x pots", () => {
+    // 8 L/h over 60 s -> 133.33 ml delivered to one pot.
+    expect(perPotVolumeMl(8, 60)).toBeCloseTo(133.33, 1);
+    // With 12 pots, the total is ~1600 ml.
+    expect(totalVolumeMl(8, 60, 12)).toBeCloseTo(1600);
   });
 
-  it("returns null when flow or pots is not configured", () => {
-    expect(waterPerPotMl(0, 60, 12)).toBeNull();
-    expect(waterPerPotMl(300, 60, 0)).toBeNull();
-    expect(waterPerPotMl(300, 60, -1)).toBeNull();
+  it("returns null when no flow rate is configured", () => {
+    expect(perPotVolumeMl(0, 60)).toBeNull();
+    expect(totalVolumeMl(0, 60, 12)).toBeNull();
+    expect(totalVolumeMl(-5, 60, 12)).toBeNull();
+  });
+
+  it("total equals per-pot volume when pots is not configured", () => {
+    expect(totalVolumeMl(8, 60, 0)).toBeCloseTo(133.33, 1);
+    expect(totalVolumeMl(8, 60, -1)).toBeCloseTo(133.33, 1);
   });
 
   it("formats ml and switches to liters above 1000 ml", () => {

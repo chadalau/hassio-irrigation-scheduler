@@ -18,15 +18,14 @@ import {
   formatMl,
   formatRemaining,
   formatTime,
-  formatVolume,
   isAllDays,
+  perPotVolumeMl,
   progressPct,
   remainingSeconds,
   sanitizeSchedules,
   timeToSeconds,
   toServiceTime,
-  waterPerPotMl,
-  waterVolume,
+  totalVolumeMl,
 } from "./utils";
 import type {
   CardConfig,
@@ -337,8 +336,8 @@ export class IrrigationScheduleCard extends LitElement {
     flowRate: number,
     numberOfPots: number,
   ): TemplateResult {
-    const volume = waterVolume(flowRate, schedule.duration);
-    const perPot = waterPerPotMl(flowRate, schedule.duration, numberOfPots);
+    const perPot = perPotVolumeMl(flowRate, schedule.duration);
+    const total = totalVolumeMl(flowRate, schedule.duration, numberOfPots);
     return html`
       <div class="schedule-row">
         <div class="schedule-time">${formatTime(schedule.time)}</div>
@@ -351,10 +350,10 @@ export class IrrigationScheduleCard extends LitElement {
         </div>
         <div class="schedule-duration">
           ${formatDuration(schedule.duration)}
-          ${volume !== null
-            ? html`<span class="schedule-volume">≈ ${formatVolume(volume)}</span>`
+          ${total !== null
+            ? html`<span class="schedule-volume">≈ ${formatMl(total)}</span>`
             : ""}
-          ${volume !== null && perPot !== null
+          ${total !== null && perPot !== null
             ? html`<span class="schedule-perpot">· ${formatMl(perPot)}/vaso</span>`
             : ""}
         </div>
@@ -389,14 +388,14 @@ export class IrrigationScheduleCard extends LitElement {
       return "Regar agora";
     }
     const label = `Regar agora por ${formatDuration(defaultDuration)}`;
-    const volume = waterVolume(flowRate, defaultDuration);
-    if (volume === null) {
+    const perPot = perPotVolumeMl(flowRate, defaultDuration);
+    const total = totalVolumeMl(flowRate, defaultDuration, numberOfPots);
+    if (total === null) {
       return label;
     }
-    const perPot = waterPerPotMl(flowRate, defaultDuration, numberOfPots);
     return perPot !== null
-      ? `${label} (≈ ${formatVolume(volume)} · ${formatMl(perPot)}/vaso)`
-      : `${label} (≈ ${formatVolume(volume)})`;
+      ? `${label} (≈ ${formatMl(total)} · ${formatMl(perPot)}/vaso)`
+      : `${label} (≈ ${formatMl(total)})`;
   }
 
   private _renderSettings(flowRate: number, numberOfPots: number): TemplateResult {
