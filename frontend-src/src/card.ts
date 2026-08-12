@@ -201,7 +201,6 @@ export class IrrigationScheduleCard extends LitElement {
     const locale = this._locale();
     const labels = dayLabels(locale);
     const schedules = sanitizeSchedules(sensor.attributes.schedules);
-    const defaultDuration = this._numberAttr(sensor, "default_duration") ?? 0;
     const flowRate = this._numberAttr(sensor, "flow_rate_lph") ?? 0;
     const numberOfPots = this._numberAttr(sensor, "number_of_pots") ?? 0;
     const reservoirVolume = this._numberAttr(sensor, "reservoir_volume_l") ?? 0;
@@ -233,7 +232,6 @@ export class IrrigationScheduleCard extends LitElement {
     const progress =
       startedAt && finishesAt ? progressPct(finishesAt, startedAt, nowIso) : 0;
 
-    const waterNowLabel = this._waterNowLabel(defaultDuration, flowRate, numberOfPots);
 
     return html`
       <ha-card class=${compact ? "compact" : ""}>
@@ -321,7 +319,7 @@ export class IrrigationScheduleCard extends LitElement {
                     ?disabled=${wateringOn}
                     @click=${this._waterNow}
                   >
-                    ${waterNowLabel}
+                    Regar agora
                   </ha-button>
                 `
               : ""}
@@ -381,25 +379,6 @@ export class IrrigationScheduleCard extends LitElement {
         </div>
       </div>
     `;
-  }
-
-  private _waterNowLabel(
-    defaultDuration: number,
-    flowRate: number,
-    numberOfPots: number,
-  ): string {
-    if (defaultDuration <= 0) {
-      return "Regar agora";
-    }
-    const label = `Regar agora por ${formatDuration(defaultDuration)}`;
-    const perPot = perPotVolumeMl(flowRate, defaultDuration);
-    const total = totalVolumeMl(flowRate, defaultDuration, numberOfPots);
-    if (total === null) {
-      return label;
-    }
-    return perPot !== null
-      ? `${label} (≈ ${formatMl(total)} · ${formatMl(perPot)}/vaso)`
-      : `${label} (≈ ${formatMl(total)})`;
   }
 
   private _renderSettings(

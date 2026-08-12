@@ -227,7 +227,7 @@ export const cardStyles = css`
   .actions {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 8px;
     margin-top: 12px;
     flex-wrap: wrap;
@@ -235,6 +235,7 @@ export const cardStyles = css`
 
   .actions ha-button {
     --mdc-button-height: 30px;
+    --mdc-button-horizontal-padding: 10px;
     --mdc-typography-button-font-size: 0.8rem;
   }
 
