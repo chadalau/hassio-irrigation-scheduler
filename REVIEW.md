@@ -2,6 +2,12 @@
 
 **Status final: APROVADO** · Data: 2026-08-11
 
+> **Nota (2026-08-12):** este documento descreve a revisão do commit inicial.
+> Desde então o projeto ganhou vazão/vasos/reservatório editáveis, um gate de
+> pH opcional por zona, correção do idioma dos dias da semana no card e
+> ajustes de layout — ver [`FUNCTIONS.md`](FUNCTIONS.md) para a referência
+> atualizada e a seção "Adendo" abaixo para o que mudou depois desta revisão.
+
 ## Escopo
 
 Integração custom de Home Assistant `irrigation_scheduler` (1 config entry = 1
@@ -78,6 +84,43 @@ corrigidos e com testes de regressão:
   O `glue` foi testado contra HA 2026.2.3 via `pytest-homeassistant-custom-component`.
 - `hass_frontend` não é instalável via PyPI; os testes usam o import lazy do
   frontend e uma fixture que emula o frontend carregado.
+
+## Adendo — 2026-08-12
+
+Mudanças feitas depois da revisão original acima, nesta sessão:
+
+1. **Gate de pH opcional por zona:** `ph_entity_id`/`ph_min`/`ph_max` em
+   `entry.options`, configuráveis via config flow, options flow, serviço
+   `set_zone_options` e o painel de settings do próprio card. Só afeta regas
+   **agendadas** (`_async_schedule_fired` → `_check_ph_gate`); `water_now` é
+   sempre um override manual e ignora o gate, por decisão explícita do
+   usuário. É falha-segura: sensor ausente/indisponível/valor não numérico
+   bloqueia a rega (nunca rega "às cegas"). Um horário pulado fica marcado em
+   `schedule_warnings` (em memória, não persiste a restart) até a próxima vez
+   que aquele horário regar com sucesso; o card mostra um ícone `!` na linha
+   do horário com o motivo no tooltip.
+2. **Correção — dias da semana em inglês mesmo com HA em pt-BR:** o card
+   inteiro é hardcoded em português (diálogos, botões, erros), exceto
+   `dayLabels`/`allDaysLabel`/a data do próximo horário, que seguiam
+   `hass.locale.language`. Essa localização parcial é a causa raiz do bug
+   relatado — corrigido fixando tudo em pt-BR (`utils.ts`, `card.ts`).
+3. **Correção — layout do card:** linha de horário reestruturada em duas
+   linhas (dias em cima; duração/switch/ações embaixo) para não "encavalar"
+   quando há vários dias selecionados; botões "Adicionar horário"/"Regar
+   agora" agora dividem a largura igualmente em vez de ficarem
+   desproporcionais.
+4. Achados da análise de código anterior corrigidos: descrição do serviço
+   `set_zone_options` no `services.yaml` agora menciona o reservatório;
+   `manifest.json` em `0.2.0`; cobertura de teste do card (`card.test.ts`)
+   ampliada além de `setConfig`/`validateCardConfig`.
+
+**Validação (2026-08-12):**
+
+| Camada | Verificação | Resultado |
+|---|---|---|
+| Backend puro | `pytest tests/test_next_run.py tests/test_schedules.py` | 28 passed |
+| Backend + HA | `pytest tests -q` (HA 2026.2.3 + PHCC) | 77 passed |
+| Frontend | `npm run typecheck` / `npm run test` / `npm run build` | 0 erros / 63 passed / bundle idêntico ao build limpo |
 
 ## Comandos reproduzíveis
 

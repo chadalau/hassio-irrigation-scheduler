@@ -118,14 +118,35 @@ export const cardStyles = css`
 
   .schedule-row {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 6px 0;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 0;
     border-bottom: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
   }
 
   .schedule-row:last-child {
     border-bottom: none;
+  }
+
+  .schedule-row-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .schedule-row-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .schedule-row-controls {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
   }
 
   .schedule-row ha-switch {
@@ -138,13 +159,12 @@ export const cardStyles = css`
   .schedule-time {
     font-weight: 600;
     font-variant-numeric: tabular-nums;
-    min-width: 52px;
+    flex-shrink: 0;
   }
 
   .schedule-days {
     display: flex;
     gap: 4px;
-    flex: 1;
     flex-wrap: wrap;
   }
 
@@ -162,9 +182,18 @@ export const cardStyles = css`
     color: var(--text-primary-color, #fff);
   }
 
+  .warning-icon {
+    --mdc-icon-size: 18px;
+    color: var(--warning-color, #ff9800);
+    flex-shrink: 0;
+  }
+
   .schedule-duration {
     font-size: 0.85rem;
     color: var(--secondary-text-color);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
 
@@ -226,17 +255,18 @@ export const cardStyles = css`
 
   .actions {
     display: flex;
-    align-items: center;
-    justify-content: flex-start;
+    align-items: stretch;
     gap: 8px;
     margin-top: 12px;
     flex-wrap: wrap;
   }
 
   .actions ha-button {
-    --mdc-button-height: 30px;
-    --mdc-button-horizontal-padding: 10px;
+    --mdc-button-height: 34px;
+    --mdc-button-horizontal-padding: 12px;
     --mdc-typography-button-font-size: 0.8rem;
+    flex: 1 1 0;
+    min-width: 140px;
   }
 
   .config-error {

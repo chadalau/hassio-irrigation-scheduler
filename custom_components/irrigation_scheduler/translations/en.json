@@ -10,12 +10,16 @@
           "default_duration": "Default duration (minutes)",
           "flow_rate_lph": "Flow rate (L/h)",
           "number_of_pots": "Number of pots (optional)",
-          "reservoir_volume_l": "Reservoir volume (L, optional)"
+          "reservoir_volume_l": "Reservoir volume (L, optional)",
+          "ph_entity_id": "pH sensor (optional)",
+          "ph_min": "Minimum pH to water",
+          "ph_max": "Maximum pH to water"
         }
       }
     },
     "error": {
-      "default_duration_too_high": "Default duration must not exceed the max duration."
+      "default_duration_too_high": "Default duration must not exceed the max duration.",
+      "ph_min_too_high": "Minimum pH must not be greater than maximum pH."
     },
     "abort": {
       "already_configured": "This target entity is already configured as an irrigation zone."
@@ -31,12 +35,16 @@
           "max_duration": "Max duration (minutes)",
           "flow_rate_lph": "Flow rate (L/h)",
           "number_of_pots": "Number of pots (optional)",
-          "reservoir_volume_l": "Reservoir volume (L, optional)"
+          "reservoir_volume_l": "Reservoir volume (L, optional)",
+          "ph_entity_id": "pH sensor (optional)",
+          "ph_min": "Minimum pH to water",
+          "ph_max": "Maximum pH to water"
         }
       }
     },
     "error": {
-      "default_duration_too_high": "Default duration must not exceed the max duration."
+      "default_duration_too_high": "Default duration must not exceed the max duration.",
+      "ph_min_too_high": "Minimum pH must not be greater than maximum pH."
     }
   },
   "entity": {
@@ -142,7 +150,7 @@
     },
     "set_zone_options": {
       "name": "Set zone options",
-      "description": "Update optional zone settings (flow rate, number of pots and reservoir volume).",
+      "description": "Update optional zone settings (flow rate, number of pots, reservoir volume and the pH gate).",
       "fields": {
         "flow_rate_lph": {
           "name": "Flow rate",
@@ -155,6 +163,18 @@
         "reservoir_volume_l": {
           "name": "Reservoir volume",
           "description": "Water reservoir volume in liters."
+        },
+        "ph_entity_id": {
+          "name": "pH sensor",
+          "description": "Entity id of a pH sensor. When set, SCHEDULED runs only start while its reading is within ph_min/ph_max (water_now always ignores this). Send an empty string to disable the gate."
+        },
+        "ph_min": {
+          "name": "Minimum pH",
+          "description": "Minimum pH (0-14) that allows a scheduled run to start."
+        },
+        "ph_max": {
+          "name": "Maximum pH",
+          "description": "Maximum pH (0-14) that allows a scheduled run to start."
         }
       }
     }

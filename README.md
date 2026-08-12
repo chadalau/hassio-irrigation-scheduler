@@ -53,12 +53,17 @@ The card shows:
   `finishes_at`, no backend polling) with a **Parar** button;
 - the next scheduled run;
 - the list of schedules (time, day chips, duration) with per-schedule
-  enable/disable, edit and delete;
+  enable/disable, edit and delete, and a `!` warning badge on any schedule
+  whose last SCHEDULED firing was skipped by the pH gate (hover for the
+  reason);
 - an **Adicionar horário** dialog (time, days, duration);
-- a **Regar agora** button (uses the zone's default duration).
+- a **Regar agora** button (uses the zone's default duration);
+- a settings panel (gear icon) to edit flow rate, number of pots, reservoir
+  volume and the optional pH gate (sensor entity id + min/max) without
+  leaving the dashboard.
 
-The card works in Portuguese by default and adapts to the HA locale when
-available.
+The card is Portuguese-only by design: every string in it (labels, dialogs,
+errors, day abbreviations) is hardcoded, it does not follow `hass.language`.
 
 ## Entities (per zone, one device)
 
@@ -81,6 +86,7 @@ device/area targets too.
 | `irrigation_scheduler.update_schedule` | Update fields of an existing schedule by `id`. The `id` is immutable. |
 | `irrigation_scheduler.remove_schedule` | Remove a schedule by `id`. |
 | `irrigation_scheduler.set_schedules` | Replace all schedules of the zone. Existing ids are preserved. |
+| `irrigation_scheduler.set_zone_options` | Update optional zone settings: `flow_rate_lph`, `number_of_pots`, `reservoir_volume_l`, and the pH gate (`ph_entity_id`, `ph_min`, `ph_max`). Every field is independently optional; send `ph_entity_id: ""` to explicitly disable the pH gate. |
 
 ```yaml
 service: irrigation_scheduler.water_now
@@ -104,6 +110,12 @@ data:
   `Store` (`irrigation_scheduler.runtime`) and recovered on startup.
 - Updating `entry.options` does not reload the entry, so an active run is
   never interrupted by an options change.
+- Optional pH gate: when a zone configures a pH sensor (`ph_entity_id`) and a
+  `[ph_min, ph_max]` range, SCHEDULED runs only start while the sensor reads
+  inside that range. It is fail-safe: a missing, unavailable or unparseable
+  reading blocks the run rather than watering blindly, and the skipped
+  schedule is flagged with a warning until it next waters successfully.
+  `water_now` is always an explicit manual override and ignores the gate.
 
 ## Development
 

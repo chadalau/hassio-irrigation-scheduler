@@ -10,12 +10,16 @@
           "default_duration": "Duração padrão (minutos)",
           "flow_rate_lph": "Vazão (L/h)",
           "number_of_pots": "Número de vasos (opcional)",
-          "reservoir_volume_l": "Volume do reservatório (L, opcional)"
+          "reservoir_volume_l": "Volume do reservatório (L, opcional)",
+          "ph_entity_id": "Sensor de pH (opcional)",
+          "ph_min": "pH mínimo para regar",
+          "ph_max": "pH máximo para regar"
         }
       }
     },
     "error": {
-      "default_duration_too_high": "A duração padrão não pode exceder a duração máxima."
+      "default_duration_too_high": "A duração padrão não pode exceder a duração máxima.",
+      "ph_min_too_high": "O pH mínimo não pode ser maior que o pH máximo."
     },
     "abort": {
       "already_configured": "Esta entidade alvo já está configurada como zona de irrigação."
@@ -31,12 +35,16 @@
           "max_duration": "Duração máxima (minutos)",
           "flow_rate_lph": "Vazão (L/h)",
           "number_of_pots": "Número de vasos (opcional)",
-          "reservoir_volume_l": "Volume do reservatório (L, opcional)"
+          "reservoir_volume_l": "Volume do reservatório (L, opcional)",
+          "ph_entity_id": "Sensor de pH (opcional)",
+          "ph_min": "pH mínimo para regar",
+          "ph_max": "pH máximo para regar"
         }
       }
     },
     "error": {
-      "default_duration_too_high": "A duração padrão não pode exceder a duração máxima."
+      "default_duration_too_high": "A duração padrão não pode exceder a duração máxima.",
+      "ph_min_too_high": "O pH mínimo não pode ser maior que o pH máximo."
     }
   },
   "entity": {
@@ -142,7 +150,7 @@
     },
     "set_zone_options": {
       "name": "Definir opções da zona",
-      "description": "Atualize opções opcionais da zona (vazão, número de vasos e volume do reservatório).",
+      "description": "Atualize opções opcionais da zona (vazão, número de vasos, volume do reservatório e o gate de pH).",
       "fields": {
         "flow_rate_lph": {
           "name": "Vazão",
@@ -155,6 +163,18 @@
         "reservoir_volume_l": {
           "name": "Volume do reservatório",
           "description": "Volume de água do reservatório em litros."
+        },
+        "ph_entity_id": {
+          "name": "Sensor de pH",
+          "description": "ID da entidade de um sensor de pH. Quando definido, regas AGENDADAS só começam enquanto a leitura estiver entre ph_min/ph_max (o water_now sempre ignora isso). Envie uma string vazia para desativar o gate."
+        },
+        "ph_min": {
+          "name": "pH mínimo",
+          "description": "pH mínimo (0-14) que permite uma rega agendada começar."
+        },
+        "ph_max": {
+          "name": "pH máximo",
+          "description": "pH máximo (0-14) que permite uma rega agendada começar."
         }
       }
     }

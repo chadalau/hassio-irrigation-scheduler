@@ -16,6 +16,9 @@ CONF_MAX_DURATION = "max_duration"
 CONF_FLOW_RATE_LPH = "flow_rate_lph"
 CONF_NUMBER_OF_POTS = "number_of_pots"
 CONF_RESERVOIR_VOLUME_L = "reservoir_volume_l"
+CONF_PH_ENTITY_ID = "ph_entity_id"
+CONF_PH_MIN = "ph_min"
+CONF_PH_MAX = "ph_max"
 CONF_SCHEDULES = "schedules"
 
 # Schedule keys.
@@ -31,6 +34,16 @@ DEFAULT_MAX_DURATION = 7200
 DEFAULT_FLOW_RATE_LPH = 0
 DEFAULT_NUMBER_OF_POTS = 0
 DEFAULT_RESERVOIR_VOLUME_L = 0
+# Empty string means "no pH sensor configured" -> the pH gate is disabled and
+# scheduled runs behave exactly as before this feature existed.
+DEFAULT_PH_ENTITY_ID = ""
+# 0..14 covers the whole pH scale, i.e. no effective restriction until the
+# zone owner narrows it -- mirrors how 0 means "unconfigured" for the other
+# optional zone settings above.
+DEFAULT_PH_MIN = 0.0
+DEFAULT_PH_MAX = 14.0
+PH_SCALE_MIN = 0.0
+PH_SCALE_MAX = 14.0
 MIN_DURATION = 1
 MAX_SCHEDULE_DURATION = 86400
 

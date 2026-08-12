@@ -68,6 +68,11 @@ export interface NextRunAttributes extends Record<string, unknown> {
   flow_rate_lph?: number;
   number_of_pots?: number;
   reservoir_volume_l?: number;
+  ph_entity_id?: string;
+  ph_min?: number;
+  ph_max?: number;
+  /** schedule id -> reason text, present while a scheduled fire was skipped by the pH gate. */
+  schedule_warnings?: Record<string, string>;
   switch_entity_id?: string;
   binary_sensor_entity_id?: string;
 }

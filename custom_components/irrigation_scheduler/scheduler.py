@@ -32,6 +32,14 @@ Design notes
 - Reentrancy of the state-change listener is prevented with a monotonically
   increasing run generation token (``_run_id``) compared in the listener, and
   by clearing the in-memory run state before awaiting any target command.
+- Optional pH gate: a zone may configure ``ph_entity_id``/``ph_min``/
+  ``ph_max`` to only let SCHEDULED runs start while a pH sensor reads inside
+  the configured range. It is fail-safe (a missing/unavailable/unparseable
+  sensor blocks the run, never waters blindly) and applies ONLY to schedule
+  firings -- ``water_now`` is always an explicit manual override and bypasses
+  it. A skipped firing is remembered per-schedule-id (``_schedule_warnings``,
+  in memory only) so the card can flag it, and clears the next time that
+  schedule successfully starts a run.
 """
 
 from __future__ import annotations
@@ -58,6 +66,9 @@ from .const import (
     CONF_FLOW_RATE_LPH,
     CONF_MAX_DURATION,
     CONF_NUMBER_OF_POTS,
+    CONF_PH_ENTITY_ID,
+    CONF_PH_MAX,
+    CONF_PH_MIN,
     CONF_RESERVOIR_VOLUME_L,
     CONF_SCHEDULE_DURATION,
     CONF_SCHEDULE_ID,
@@ -68,10 +79,15 @@ from .const import (
     DEFAULT_FLOW_RATE_LPH,
     DEFAULT_MAX_DURATION,
     DEFAULT_NUMBER_OF_POTS,
+    DEFAULT_PH_ENTITY_ID,
+    DEFAULT_PH_MAX,
+    DEFAULT_PH_MIN,
     DEFAULT_RESERVOIR_VOLUME_L,
     DOMAIN,
     MAX_SCHEDULE_DURATION,
     MIN_DURATION,
+    PH_SCALE_MAX,
+    PH_SCALE_MIN,
     SIGNAL_UPDATE,
     SOURCE_MANUAL,
     SOURCE_SCHEDULE,
@@ -133,6 +149,13 @@ class IrrigationScheduler:
         # Next scheduled fire.
         self._next_run: datetime | None = None
         self._next_schedule: dict[str, Any] | None = None
+
+        # Per-schedule pH-gate warnings (schedule_id -> reason), kept in
+        # memory only (informational UI hint, not restart-critical). A
+        # schedule enters this dict when a SCHEDULED firing is skipped
+        # because the pH gate blocked it, and leaves it the next time that
+        # same schedule successfully starts a run (or is removed).
+        self._schedule_warnings: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Public properties
@@ -280,6 +303,54 @@ class IrrigationScheduler:
         )
         return DEFAULT_RESERVOIR_VOLUME_L
 
+    @property
+    def ph_entity_id(self) -> str:
+        """Entity id of the pH sensor gating scheduled runs ("" = disabled)."""
+        value = self.entry.options.get(CONF_PH_ENTITY_ID, DEFAULT_PH_ENTITY_ID)
+        if isinstance(value, str):
+            return value
+        _LOGGER.warning(
+            "Invalid ph_entity_id in options for %s; using default %r",
+            self.entry.entry_id,
+            DEFAULT_PH_ENTITY_ID,
+        )
+        return DEFAULT_PH_ENTITY_ID
+
+    @property
+    def ph_min(self) -> float:
+        """Minimum pH (inclusive) that allows a scheduled run to start."""
+        return self._ph_option(CONF_PH_MIN, DEFAULT_PH_MIN)
+
+    @property
+    def ph_max(self) -> float:
+        """Maximum pH (inclusive) that allows a scheduled run to start."""
+        return self._ph_option(CONF_PH_MAX, DEFAULT_PH_MAX)
+
+    @property
+    def schedule_warnings(self) -> dict[str, str]:
+        """Schedule ids currently flagged because the pH gate skipped them."""
+        return dict(self._schedule_warnings)
+
+    def _ph_option(self, key: str, default: float) -> float:
+        """Return a validated pH bound (0..14) from options, or ``default``."""
+        try:
+            value = self.entry.options.get(key, default)
+            if (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and PH_SCALE_MIN <= value <= PH_SCALE_MAX
+            ):
+                return float(value)
+        except (TypeError, ValueError):
+            pass
+        _LOGGER.warning(
+            "Invalid %s in options for %s; using default %s",
+            key,
+            self.entry.entry_id,
+            default,
+        )
+        return default
+
     def _duration_option(self, key: str, default: int) -> int:
         """Return a validated duration option (seconds) or ``default``.
 
@@ -360,12 +431,18 @@ class IrrigationScheduler:
         flow_rate_lph: int | None = None,
         number_of_pots: int | None = None,
         reservoir_volume_l: int | None = None,
+        ph_entity_id: str | None = None,
+        ph_min: float | None = None,
+        ph_max: float | None = None,
     ) -> None:
-        """Update optional zone settings (flow rate / pots / reservoir volume).
+        """Update optional zone settings (flow rate / pots / reservoir / pH gate).
 
         Only the fields that are not ``None`` are changed; the rest of the
-        options are preserved. The entry is NOT reloaded (the update listener
-        only recalculates the next firing).
+        options are preserved. ``ph_entity_id=""`` explicitly disables the pH
+        gate (an empty string is a valid, meaningful value here -- it is only
+        skipped when the caller passes ``None``, i.e. "leave unchanged"). The
+        entry is NOT reloaded (the update listener only recalculates the next
+        firing).
         """
         options = dict(self.entry.options)
         if flow_rate_lph is not None:
@@ -374,6 +451,12 @@ class IrrigationScheduler:
             options[CONF_NUMBER_OF_POTS] = number_of_pots
         if reservoir_volume_l is not None:
             options[CONF_RESERVOIR_VOLUME_L] = reservoir_volume_l
+        if ph_entity_id is not None:
+            options[CONF_PH_ENTITY_ID] = ph_entity_id
+        if ph_min is not None:
+            options[CONF_PH_MIN] = ph_min
+        if ph_max is not None:
+            options[CONF_PH_MAX] = ph_max
         self.hass.config_entries.async_update_entry(self.entry, options=options)
 
     async def async_add_schedule(self, schedule: dict[str, Any]) -> None:
@@ -398,6 +481,7 @@ class IrrigationScheduler:
 
     async def async_remove_schedule(self, schedule_id: str) -> None:
         """Remove a schedule by its id."""
+        self._schedule_warnings.pop(schedule_id, None)
         await self.async_set_schedules(
             [s for s in self.schedules if s.get(CONF_SCHEDULE_ID) != schedule_id]
         )
@@ -440,6 +524,11 @@ class IrrigationScheduler:
                 self.entry.entry_id,
             )
             return
+
+        if schedule_id is not None:
+            # This schedule is about to water: any pH-gate warning it carried
+            # from a previous skipped firing no longer applies.
+            self._schedule_warnings.pop(schedule_id, None)
 
         # Security watchdog: clamp to 1..max_duration.
         duration = max(MIN_DURATION, min(int(duration), self.max_duration))
@@ -711,7 +800,11 @@ class IrrigationScheduler:
         )
 
     async def _async_schedule_fired(self, *_: Any) -> None:
-        """The scheduled next-run timer fired."""
+        """The scheduled next-run timer fired.
+
+        Only SCHEDULED firings are gated by pH (a manual ``water_now`` is
+        always an explicit override and bypasses it, per design).
+        """
         if self._is_watering:
             _LOGGER.debug(
                 "Scheduled start ignored for %s: already watering",
@@ -725,12 +818,59 @@ class IrrigationScheduler:
                     self.entry.entry_id,
                 )
             else:
-                await self._async_start_run(
-                    duration=int(schedule[CONF_SCHEDULE_DURATION]),
-                    source=SOURCE_SCHEDULE,
-                    schedule_id=schedule.get(CONF_SCHEDULE_ID),
-                )
+                schedule_id = schedule.get(CONF_SCHEDULE_ID)
+                allowed, reason = self._check_ph_gate()
+                if not allowed:
+                    _LOGGER.warning(
+                        "Skipping scheduled watering for %s (schedule %s): %s",
+                        self.entry.entry_id,
+                        schedule_id,
+                        reason,
+                    )
+                    if schedule_id is not None:
+                        self._schedule_warnings[schedule_id] = (
+                            reason or "pH fora do intervalo configurado"
+                        )
+                    self._async_dispatch_update()
+                else:
+                    await self._async_start_run(
+                        duration=int(schedule[CONF_SCHEDULE_DURATION]),
+                        source=SOURCE_SCHEDULE,
+                        schedule_id=schedule_id,
+                    )
         self._reschedule_next()
+
+    def _check_ph_gate(self) -> tuple[bool, str | None]:
+        """Whether the pH gate allows a scheduled run to start right now.
+
+        Returns ``(True, None)`` when the gate is disabled (no
+        ``ph_entity_id`` configured) or the current pH reading is within
+        ``[ph_min, ph_max]``. Returns ``(False, reason)`` when the sensor is
+        missing/unavailable/unparseable (fail-safe: never water on an unknown
+        pH) or the reading is outside the configured range.
+        """
+        entity_id = self.ph_entity_id
+        if not entity_id:
+            return True, None
+
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable"):
+            return False, f"Sensor de pH {entity_id} indisponível"
+
+        try:
+            value = float(state.state)
+        except (TypeError, ValueError):
+            return False, (
+                f"Sensor de pH {entity_id} com valor inválido ({state.state!r})"
+            )
+
+        ph_min = self.ph_min
+        ph_max = self.ph_max
+        if value < ph_min:
+            return False, f"pH {value:g} abaixo do mínimo ({ph_min:g})"
+        if value > ph_max:
+            return False, f"pH {value:g} acima do máximo ({ph_max:g})"
+        return True, None
 
     async def _async_target_state_changed(self, event: Event) -> None:
         """React to the target entity turning off externally."""

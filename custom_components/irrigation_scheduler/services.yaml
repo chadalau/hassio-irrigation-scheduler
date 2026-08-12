@@ -158,7 +158,7 @@ set_schedules:
 
 set_zone_options:
   name: Set zone options
-  description: Update optional zone settings (flow rate and/or number of pots).
+  description: Update optional zone settings (flow rate, number of pots, reservoir volume and the pH gate).
   target:
     entity:
       integration: irrigation_scheduler
@@ -188,4 +188,27 @@ set_zone_options:
           min: 0
           max: 100000
           unit_of_measurement: L
+          mode: box
+    ph_entity_id:
+      name: pH sensor
+      description: Entity id of a pH sensor. When set, SCHEDULED runs only start while its reading is within ph_min/ph_max (water_now always ignores this). Send an empty string to disable the gate.
+      selector:
+        text:
+    ph_min:
+      name: Minimum pH
+      description: Minimum pH (0-14) that allows a scheduled run to start.
+      selector:
+        number:
+          min: 0
+          max: 14
+          step: 0.1
+          mode: box
+    ph_max:
+      name: Maximum pH
+      description: Maximum pH (0-14) that allows a scheduled run to start.
+      selector:
+        number:
+          min: 0
+          max: 14
+          step: 0.1
           mode: box

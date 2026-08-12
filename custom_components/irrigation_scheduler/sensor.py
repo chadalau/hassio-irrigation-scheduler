@@ -71,6 +71,10 @@ class IrrigationSchedulerSensor(SensorEntity):
             "flow_rate_lph": self._scheduler.flow_rate_lph,
             "number_of_pots": self._scheduler.number_of_pots,
             "reservoir_volume_l": self._scheduler.reservoir_volume_l,
+            "ph_entity_id": self._scheduler.ph_entity_id,
+            "ph_min": self._scheduler.ph_min,
+            "ph_max": self._scheduler.ph_max,
+            "schedule_warnings": self._scheduler.schedule_warnings,
             "switch_entity_id": self._switch_entity_id,
             "binary_sensor_entity_id": self._binary_sensor_entity_id,
         }

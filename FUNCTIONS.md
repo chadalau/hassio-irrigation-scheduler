@@ -82,7 +82,8 @@ criacao, nao nesta funcao.
 #### `IrrigationSchedulerConfigFlow.async_step_user(user_input)`
 
 Cria uma zona pela interface do Home Assistant. Configura nome, entidade alvo,
-duracao padrao, vazao em L/h, numero de vasos e volume do reservatorio.
+duracao padrao, vazao em L/h, numero de vasos, volume do reservatorio e o gate
+de pH opcional (sensor + faixa min/max). Rejeita `ph_min > ph_max`.
 
 #### `IrrigationSchedulerConfigFlow.async_get_options_flow(config_entry)`
 
@@ -90,8 +91,9 @@ Abre o fluxo para editar as opcoes de uma zona existente.
 
 #### `IrrigationSchedulerOptionsFlow.async_step_init(user_input)`
 
-Edita duracao padrao, duracao maxima, vazao, numero de vasos e volume do
-reservatorio sem interromper uma rega em andamento.
+Edita duracao padrao, duracao maxima, vazao, numero de vasos, volume do
+reservatorio e o gate de pH sem interromper uma rega em andamento. Rejeita
+`default_duration > max_duration` e `ph_min > ph_max`.
 
 ### `scheduler.py`
 
@@ -124,6 +126,9 @@ Cria o controlador de uma zona e inicializa timers, estado da rega e listeners.
 | `flow_rate_lph` | Vazao configurada por vaso em litros por hora. |
 | `number_of_pots` | Numero de vasos da zona; zero significa nao configurado. |
 | `reservoir_volume_l` | Volume do reservatorio em litros; reservado para uso futuro. |
+| `ph_entity_id` | Entidade do sensor de pH que trava regas agendadas; string vazia desativa o gate. |
+| `ph_min` / `ph_max` | Faixa de pH (0-14) que permite uma rega agendada comecar. |
+| `schedule_warnings` | Dicionario `{schedule_id: motivo}` dos horarios cuja ultima rega agendada foi pulada pelo gate de pH. Em memoria apenas (nao sobrevive a restart). |
 
 #### `async_setup()`
 
@@ -143,10 +148,11 @@ Liga ou desliga o agendamento geral da zona.
 
 Substitui a lista completa de horarios nas options.
 
-#### `async_set_zone_options(flow_rate_lph, number_of_pots, reservoir_volume_l)`
+#### `async_set_zone_options(flow_rate_lph, number_of_pots, reservoir_volume_l, ph_entity_id, ph_min, ph_max)`
 
 Atualiza as configuracoes opcionais da zona sem recarregar a entrada. Campos
-com valor `None` permanecem inalterados.
+com valor `None` permanecem inalterados. `ph_entity_id=""` e um valor
+explicito valido (desativa o gate de pH), diferente de `None` (nao altera).
 
 #### `async_add_schedule(schedule)`
 
@@ -199,7 +205,16 @@ dispositivos lentos. Se nao atuou, envia desligamento defensivo.
 
 #### `_async_schedule_fired()`
 
-Callback do proximo horario agendado. Ignora disparos sobrepostos.
+Callback do proximo horario agendado. Ignora disparos sobrepostos e, quando o
+gate de pH bloqueia (ver `_check_ph_gate`), pula a rega registrando um aviso
+em `schedule_warnings` em vez de iniciar.
+
+#### `_check_ph_gate()`
+
+Verifica se a rega agendada pode comecar: sem `ph_entity_id` configurado o
+gate esta desativado (permite sempre); com sensor ausente/indisponivel/valor
+nao numerico, bloqueia (falha segura); com leitura fora de `[ph_min, ph_max]`,
+bloqueia. So se aplica a regas agendadas -- `water_now` sempre ignora.
 
 #### `_async_target_state_changed(event)`
 
@@ -315,7 +330,8 @@ o agendamento geral da zona.
 #### `sensor.py - async_setup_entry(hass, entry, async_add_entities)`
 
 Cria o sensor `next_run`, que publica proximo horario, horarios, IDs das
-entidades irmas, vazao, vasos e volume do reservatorio.
+entidades irmas, vazao, vasos, volume do reservatorio, configuracao do gate
+de pH e os avisos de horarios pulados (`schedule_warnings`).
 
 #### `binary_sensor.py - async_setup_entry(hass, entry, async_add_entities)`
 
@@ -333,7 +349,7 @@ Todos aceitam alvo por entidade, dispositivo ou area.
 | `update_schedule` | Edita um horario pelo ID. |
 | `remove_schedule` | Remove horario pelo ID. |
 | `set_schedules` | Substitui todos os horarios. |
-| `set_zone_options` | Atualiza vazao, vasos e volume do reservatorio. |
+| `set_zone_options` | Atualiza vazao, vasos, volume do reservatorio e o gate de pH (sensor + faixa min/max). |
 
 Exemplo:
 
@@ -343,6 +359,9 @@ service: irrigation_scheduler.set_zone_options
   flow_rate_lph: 8
   number_of_pots: 12
   reservoir_volume_l: 1000
+  ph_entity_id: sensor.reservatorio_ph
+  ph_min: 5.5
+  ph_max: 6.5
 ```
 
 ## Card Lovelace
@@ -355,8 +374,8 @@ Arquivo fonte: `frontend-src/src/card.ts`.
 |---|---|
 | `parseTimeParts` | Faz parse e valida hora, minuto e segundo. |
 | `formatTime` | Exibe horario sem segundos quando eles sao zero. |
-| `dayLabels` | Retorna abreviacoes dos dias conforme o locale. |
-| `allDaysLabel` | Retorna `Todos os dias` ou `All days`. |
+| `dayLabels` | Retorna as abreviacoes dos dias, sempre em pt-BR (o card e Portuguese-only por design). |
+| `allDaysLabel` | Retorna `Todos os dias`. |
 | `isAllDays` | Detecta se os sete dias estao selecionados. |
 | `formatDuration` | Formata segundos em segundos, minutos e horas. |
 | `remainingSeconds` | Calcula segundos restantes ate `finishes_at`. |
@@ -379,16 +398,16 @@ Arquivo fonte: `frontend-src/src/card.ts`.
 | `getCardSize` | Informa o tamanho estimado para o Lovelace. |
 | `render` | Renderiza erro de configuracao ou o card da zona. |
 | `_renderCard` | Renderiza cabecalho, status, horarios, botoes e settings. |
-| `_renderScheduleRow` | Renderiza um horario, volume total e ml por vaso. |
+| `_renderScheduleRow` | Renderiza um horario, volume total, ml por vaso e o badge `!` quando o horario tem aviso em `schedule_warnings`. |
 | `_renderDialog` | Renderiza o formulario de adicionar/editar horario. |
-| `_renderSettings` | Renderiza vazao, vasos e reservatorio. |
+| `_renderSettings` | Renderiza vazao, vasos, reservatorio e o gate de pH (sensor + faixa min/max). |
 | `_waterNow` | Chama `water_now`. |
 | `_stopWatering` | Chama `stop`. |
 | `_toggleMaster` | Liga/desliga o agendamento geral. |
 | `_toggleScheduleEnabled` | Habilita/desabilita um horario individual. |
 | `_deleteSchedule` | Confirma e remove um horario. |
 | `_saveDialog` | Valida e chama add/update schedule. |
-| `_saveSettings` | Valida e chama `set_zone_options`. |
+| `_saveSettings` | Valida (inclusive `ph_min <= ph_max`) e chama `set_zone_options`; so envia `ph_entity_id` quando o campo foi de fato editado (string vazia e um valor explicito que desativa o gate, diferente de "nao alterado"). |
 | `_openAdd` / `_openEdit` | Abrem o formulario de horario. |
 | `_openSettings` / `_closeSettings` | Abrem/fecham as configuracoes do card. |
 | `_stopTicker` | Cancela a contagem regressiva de um segundo. |
@@ -417,6 +436,8 @@ Emite `config-changed` com a configuracao atualizada.
 | `flow_rate_lph` | L/h por vaso | `0` | Vazao usada no calculo. |
 | `number_of_pots` | vasos | `0` | Multiplicador do volume total. |
 | `reservoir_volume_l` | litros | `0` | Reservado para uso futuro. |
+| `ph_entity_id` | string | `""` | Sensor de pH; vazio desativa o gate. |
+| `ph_min` / `ph_max` | pH (0-14) | `0` / `14` | Faixa que permite uma rega agendada comecar. |
 | `schedules` | lista | `[]` | Horarios da zona. |
 
 ## Testes

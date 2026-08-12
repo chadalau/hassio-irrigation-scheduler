@@ -43,22 +43,20 @@ export function formatTime(time: string): string {
     : `${hour}:${minute}`;
 }
 
-/** Day abbreviations for a locale; defaults to pt-BR. Index 0 = Monday. */
-export function dayLabels(locale?: string | null): string[] {
-  if (!locale || locale.toLowerCase().startsWith("pt")) {
-    return [...DAYS_PT];
-  }
-  const formatter = new Intl.DateTimeFormat(locale, { weekday: "short" });
-  return Array.from({ length: 7 }, (_unused, index) => {
-    // 2000-01-03 was a Monday; a fixed date keeps the labels locale-stable.
-    const date = new Date(2000, 0, 3 + index, 12, 0, 0);
-    return formatter.format(date).replace(/\.$/, "");
-  });
+/**
+ * Day abbreviations, index 0 = Monday. Always pt-BR: every other string in
+ * this card (labels, dialogs, errors) is hardcoded Portuguese too, so making
+ * only the day labels follow ``hass.locale``/``hass.language`` produced a
+ * half-localized card -- e.g. Portuguese buttons next to "Mon Tue Wed" day
+ * chips whenever that HA field did not resolve to a "pt*" value.
+ */
+export function dayLabels(): string[] {
+  return [...DAYS_PT];
 }
 
 /** Label shown when every day of the week is selected. */
-export function allDaysLabel(locale?: string | null): string {
-  return locale && !locale.toLowerCase().startsWith("pt") ? "All days" : "Todos os dias";
+export function allDaysLabel(): string {
+  return "Todos os dias";
 }
 
 /** True when ``days`` covers Monday..Sunday (all week). */

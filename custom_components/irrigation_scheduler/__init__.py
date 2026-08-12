@@ -40,10 +40,15 @@ from .const import (
     CONF_SCHEDULES,
     CONF_FLOW_RATE_LPH,
     CONF_NUMBER_OF_POTS,
+    CONF_PH_ENTITY_ID,
+    CONF_PH_MAX,
+    CONF_PH_MIN,
     CONF_RESERVOIR_VOLUME_L,
     DOMAIN,
     MAX_SCHEDULE_DURATION,
     MIN_DURATION,
+    PH_SCALE_MAX,
+    PH_SCALE_MIN,
     PLATFORMS,
     SERVICE_ADD_SCHEDULE,
     SERVICE_REMOVE_SCHEDULE,
@@ -115,18 +120,44 @@ REMOVE_SCHEDULE_SCHEMA = vol.Schema(
     {vol.Required(CONF_SCHEDULE_ID): cv.string}
 )
 
-SET_ZONE_OPTIONS_SCHEMA = vol.Schema(
-    {
-        vol.Optional(CONF_FLOW_RATE_LPH): vol.All(
-            vol.Coerce(int), vol.Range(min=0, max=100000)
-        ),
-        vol.Optional(CONF_NUMBER_OF_POTS): vol.All(
-            vol.Coerce(int), vol.Range(min=0, max=100000)
-        ),
-        vol.Optional(CONF_RESERVOIR_VOLUME_L): vol.All(
-            vol.Coerce(int), vol.Range(min=0, max=100000)
-        ),
-    }
+def _validate_ph_range(data: dict[str, Any]) -> dict[str, Any]:
+    """Reject a call that sets ph_min above ph_max in the SAME call.
+
+    Does not (cannot, statelessly) check against a bound left unchanged from
+    a previous call; the card always sends both together, so this covers the
+    only case that matters in practice.
+    """
+    ph_min = data.get(CONF_PH_MIN)
+    ph_max = data.get(CONF_PH_MAX)
+    if ph_min is not None and ph_max is not None and ph_min > ph_max:
+        raise vol.Invalid("ph_min must not be greater than ph_max")
+    return data
+
+
+SET_ZONE_OPTIONS_SCHEMA = vol.All(
+    vol.Schema(
+        {
+            vol.Optional(CONF_FLOW_RATE_LPH): vol.All(
+                vol.Coerce(int), vol.Range(min=0, max=100000)
+            ),
+            vol.Optional(CONF_NUMBER_OF_POTS): vol.All(
+                vol.Coerce(int), vol.Range(min=0, max=100000)
+            ),
+            vol.Optional(CONF_RESERVOIR_VOLUME_L): vol.All(
+                vol.Coerce(int), vol.Range(min=0, max=100000)
+            ),
+            # Empty string is a valid, meaningful value: it explicitly
+            # disables the pH gate (see async_set_zone_options).
+            vol.Optional(CONF_PH_ENTITY_ID): cv.string,
+            vol.Optional(CONF_PH_MIN): vol.All(
+                vol.Coerce(float), vol.Range(min=PH_SCALE_MIN, max=PH_SCALE_MAX)
+            ),
+            vol.Optional(CONF_PH_MAX): vol.All(
+                vol.Coerce(float), vol.Range(min=PH_SCALE_MIN, max=PH_SCALE_MAX)
+            ),
+        }
+    ),
+    _validate_ph_range,
 )
 
 # Keys Home Assistant injects into a targeted service call. They are target
@@ -356,6 +387,9 @@ async def _async_register_services(hass: HomeAssistant) -> None:
                 flow_rate_lph=data.get(CONF_FLOW_RATE_LPH),
                 number_of_pots=data.get(CONF_NUMBER_OF_POTS),
                 reservoir_volume_l=data.get(CONF_RESERVOIR_VOLUME_L),
+                ph_entity_id=data.get(CONF_PH_ENTITY_ID),
+                ph_min=data.get(CONF_PH_MIN),
+                ph_max=data.get(CONF_PH_MAX),
             )
         return None
 

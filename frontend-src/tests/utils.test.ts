@@ -71,27 +71,12 @@ describe("parseTimeParts", () => {
 });
 
 describe("dayLabels", () => {
-  it("defaults to pt-BR abbreviations", () => {
+  it("always returns the pt-BR abbreviations", () => {
+    // The card hardcodes every other string in Portuguese too (labels,
+    // dialogs, errors), so the day chips no longer follow hass.locale --
+    // that half-localization used to show English day names on pt-BR HA
+    // installs whenever hass.locale.language didn't resolve as expected.
     expect(dayLabels()).toEqual(["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]);
-  });
-
-  it("returns the pt-BR list for pt locales", () => {
-    expect(dayLabels("pt-BR")).toEqual([
-      "Seg",
-      "Ter",
-      "Qua",
-      "Qui",
-      "Sex",
-      "Sáb",
-      "Dom",
-    ]);
-  });
-
-  it("uses Intl for other locales", () => {
-    const labels = dayLabels("en-US");
-    expect(labels).toHaveLength(7);
-    expect(labels[0]).toMatch(/^Mon$/i);
-    expect(labels[6]).toMatch(/^Sun$/i);
   });
 });
 
@@ -338,9 +323,7 @@ describe("allDaysLabel / isAllDays", () => {
     expect(isAllDays([])).toBe(false);
   });
 
-  it("labels in Portuguese by default and English otherwise", () => {
-    expect(allDaysLabel("pt-BR")).toBe("Todos os dias");
-    expect(allDaysLabel(undefined)).toBe("Todos os dias");
-    expect(allDaysLabel("en")).toBe("All days");
+  it("always labels in Portuguese", () => {
+    expect(allDaysLabel()).toBe("Todos os dias");
   });
 });

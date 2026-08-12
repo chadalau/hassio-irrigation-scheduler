@@ -85,6 +85,26 @@ export class IrrigationScheduleCard extends LitElement {
   private _settingsReservoir = "";
 
   @state()
+  private _settingsPhEntity = "";
+
+  /**
+   * Whether the pH-entity field was actually edited this session. An empty
+   * string is a meaningful, explicit value (disables the gate) distinct from
+   * "the field was never touched" (leave the stored entity id unchanged) --
+   * both look identical as a bare string, so a separate flag is required.
+   */
+  private _settingsPhEntityTouched = false;
+
+  @state()
+  private _settingsPhMin = "";
+
+  @state()
+  private _settingsPhMax = "";
+
+  @state()
+  private _settingsError: string | null = null;
+
+  @state()
   private _editingId: string | null = null;
 
   @state()
@@ -198,12 +218,15 @@ export class IrrigationScheduleCard extends LitElement {
     const compact = this._config.compact ?? DEFAULT_COMPACT;
     const showNextRun = this._config.show_next_run ?? DEFAULT_SHOW_NEXT_RUN;
     const showWaterNow = this._config.show_water_now ?? DEFAULT_SHOW_WATER_NOW;
-    const locale = this._locale();
-    const labels = dayLabels(locale);
+    const labels = dayLabels();
     const schedules = sanitizeSchedules(sensor.attributes.schedules);
     const flowRate = this._numberAttr(sensor, "flow_rate_lph") ?? 0;
     const numberOfPots = this._numberAttr(sensor, "number_of_pots") ?? 0;
     const reservoirVolume = this._numberAttr(sensor, "reservoir_volume_l") ?? 0;
+    const phEntityId = this._stringAttr(sensor, "ph_entity_id") ?? "";
+    const phMin = this._numberAttr(sensor, "ph_min") ?? 0;
+    const phMax = this._numberAttr(sensor, "ph_max") ?? 14;
+    const scheduleWarnings = this._scheduleWarnings(sensor);
     const switchEntity = this._switchEid
       ? this.hass?.states[this._switchEid]
       : undefined;
@@ -259,7 +282,14 @@ export class IrrigationScheduleCard extends LitElement {
           </div>
         </div>
 
-        ${this._renderSettings(flowRate, numberOfPots, reservoirVolume)}
+        ${this._renderSettings(
+          flowRate,
+          numberOfPots,
+          reservoirVolume,
+          phEntityId,
+          phMin,
+          phMax,
+        )}
 
         ${wateringOn && finishesAt
           ? html`
@@ -293,7 +323,7 @@ export class IrrigationScheduleCard extends LitElement {
           ? html`
               <div class="next-run">
                 <ha-icon icon="mdi:clock-start"></ha-icon>
-                <span>Próximo: ${this._nextRunText(sensor.state, locale)}</span>
+                <span>Próximo: ${this._nextRunText(sensor.state)}</span>
               </div>
             `
           : ""}
@@ -303,7 +333,13 @@ export class IrrigationScheduleCard extends LitElement {
             ${schedules.length === 0
               ? html`<div class="empty">Nenhum horário configurado.</div>`
               : schedules.map((schedule) =>
-                  this._renderScheduleRow(schedule, labels, locale, flowRate, numberOfPots),
+                  this._renderScheduleRow(
+                    schedule,
+                    labels,
+                    flowRate,
+                    numberOfPots,
+                    scheduleWarnings[schedule.id],
+                  ),
                 )}
           </div>
 
@@ -334,48 +370,63 @@ export class IrrigationScheduleCard extends LitElement {
   private _renderScheduleRow(
     schedule: Schedule,
     labels: string[],
-    locale: string,
     flowRate: number,
     numberOfPots: number,
+    warning?: string,
   ): TemplateResult {
     const perPot = perPotVolumeMl(flowRate, schedule.duration);
     const total = totalVolumeMl(flowRate, schedule.duration, numberOfPots);
     return html`
       <div class="schedule-row">
-        <div class="schedule-time">${formatTime(schedule.time)}</div>
-        <div class="schedule-days">
-          ${isAllDays(schedule.days)
-            ? html`<span class="day-chip all-days">${allDaysLabel(locale)}</span>`
-            : schedule.days.map(
-                (day) => html`<span class="day-chip">${labels[day] ?? ""}</span>`,
-              )}
-        </div>
-        <div class="schedule-duration">
-          ${formatDuration(schedule.duration)}
-          ${total !== null
-            ? html`<span class="schedule-volume">≈ ${formatMl(total)}</span>`
+        <div class="schedule-row-top">
+          <div class="schedule-time">${formatTime(schedule.time)}</div>
+          <div class="schedule-days">
+            ${isAllDays(schedule.days)
+              ? html`<span class="day-chip all-days">${allDaysLabel()}</span>`
+              : schedule.days.map(
+                  (day) => html`<span class="day-chip">${labels[day] ?? ""}</span>`,
+                )}
+          </div>
+          ${warning
+            ? html`
+                <ha-icon
+                  class="warning-icon"
+                  icon="mdi:alert"
+                  title=${`Última rega pulada: ${warning}`}
+                ></ha-icon>
+              `
             : ""}
-          ${total !== null && perPot !== null
-            ? html`<span class="schedule-perpot">· ${formatMl(perPot)}/vaso</span>`
-            : ""}
         </div>
-        <ha-switch
-          ?checked=${schedule.enabled}
-          @change=${(ev: Event) => this._toggleScheduleEnabled(schedule, ev)}
-        ></ha-switch>
-        <div class="schedule-actions">
-          <ha-icon-button
-            title="Editar"
-            @click=${() => this._openEdit(schedule)}
-          >
-            <ha-icon icon="mdi:pencil"></ha-icon>
-          </ha-icon-button>
-          <ha-icon-button
-            title="Excluir"
-            @click=${() => this._deleteSchedule(schedule)}
-          >
-            <ha-icon icon="mdi:delete"></ha-icon>
-          </ha-icon-button>
+        <div class="schedule-row-bottom">
+          <div class="schedule-duration">
+            ${formatDuration(schedule.duration)}
+            ${total !== null
+              ? html`<span class="schedule-volume">≈ ${formatMl(total)}</span>`
+              : ""}
+            ${total !== null && perPot !== null
+              ? html`<span class="schedule-perpot">· ${formatMl(perPot)}/vaso</span>`
+              : ""}
+          </div>
+          <div class="schedule-row-controls">
+            <ha-switch
+              ?checked=${schedule.enabled}
+              @change=${(ev: Event) => this._toggleScheduleEnabled(schedule, ev)}
+            ></ha-switch>
+            <div class="schedule-actions">
+              <ha-icon-button
+                title="Editar"
+                @click=${() => this._openEdit(schedule)}
+              >
+                <ha-icon icon="mdi:pencil"></ha-icon>
+              </ha-icon-button>
+              <ha-icon-button
+                title="Excluir"
+                @click=${() => this._deleteSchedule(schedule)}
+              >
+                <ha-icon icon="mdi:delete"></ha-icon>
+              </ha-icon-button>
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -385,6 +436,9 @@ export class IrrigationScheduleCard extends LitElement {
     flowRate: number,
     numberOfPots: number,
     reservoirVolume: number,
+    phEntityId: string,
+    phMin: number,
+    phMax: number,
   ): TemplateResult {
     if (!this._settingsOpen) {
       return html``;
@@ -418,6 +472,47 @@ export class IrrigationScheduleCard extends LitElement {
             @change=${this._onSettingsReservoirChange}
           />
         </div>
+        <div class="field">
+          <label>Sensor de pH (opcional)</label>
+          <input
+            type="text"
+            list="ph-sensor-options"
+            placeholder="sensor.reservatorio_ph"
+            .value=${this._settingsPhEntity || phEntityId}
+            @change=${this._onSettingsPhEntityChange}
+          />
+          <datalist id="ph-sensor-options">
+            ${this._sensorEntityIds().map((id) => html`<option value=${id}></option>`)}
+          </datalist>
+        </div>
+        <div class="field">
+          <label>Só regar (agendado) com pH entre</label>
+          <div class="duration-row">
+            <div class="duration-part">
+              <input
+                type="number"
+                min="0"
+                max="14"
+                step="0.1"
+                .value=${this._settingsPhMin || String(phMin)}
+                @change=${this._onSettingsPhMinChange}
+              />
+            </div>
+            <div class="duration-part">
+              <input
+                type="number"
+                min="0"
+                max="14"
+                step="0.1"
+                .value=${this._settingsPhMax || String(phMax)}
+                @change=${this._onSettingsPhMaxChange}
+              />
+            </div>
+          </div>
+        </div>
+        ${this._settingsError
+          ? html`<div class="form-error">${this._settingsError}</div>`
+          : ""}
         <div class="settings-actions">
           <button class="dialog-cancel" @click=${this._closeSettings}>
             Fechar
@@ -437,6 +532,11 @@ export class IrrigationScheduleCard extends LitElement {
     this._settingsFlow = "";
     this._settingsPots = "";
     this._settingsReservoir = "";
+    this._settingsPhEntity = "";
+    this._settingsPhEntityTouched = false;
+    this._settingsPhMin = "";
+    this._settingsPhMax = "";
+    this._settingsError = null;
   }
 
   private _onSettingsFlowChange(ev: Event): void {
@@ -449,6 +549,22 @@ export class IrrigationScheduleCard extends LitElement {
 
   private _onSettingsReservoirChange(ev: Event): void {
     this._settingsReservoir = (ev.target as HTMLInputElement).value;
+  }
+
+  private _onSettingsPhEntityChange(ev: Event): void {
+    this._settingsPhEntity = (ev.target as HTMLInputElement).value.trim();
+    this._settingsPhEntityTouched = true;
+    this._settingsError = null;
+  }
+
+  private _onSettingsPhMinChange(ev: Event): void {
+    this._settingsPhMin = (ev.target as HTMLInputElement).value;
+    this._settingsError = null;
+  }
+
+  private _onSettingsPhMaxChange(ev: Event): void {
+    this._settingsPhMax = (ev.target as HTMLInputElement).value;
+    this._settingsError = null;
   }
 
   private _saveSettings(): void {
@@ -465,6 +581,32 @@ export class IrrigationScheduleCard extends LitElement {
     if (Number.isFinite(reservoir) && reservoir >= 0) {
       data.reservoir_volume_l = reservoir;
     }
+
+    // ph_min/ph_max follow the same "blank = unchanged" convention as the
+    // other numeric fields above; only a cross-field contradiction (both
+    // valid but min > max) is worth surfacing as an error.
+    const phMin = Number.parseFloat(this._settingsPhMin);
+    const phMax = Number.parseFloat(this._settingsPhMax);
+    const validMin = Number.isFinite(phMin) && phMin >= 0 && phMin <= 14;
+    const validMax = Number.isFinite(phMax) && phMax >= 0 && phMax <= 14;
+    if (validMin && validMax && phMin > phMax) {
+      this._settingsError = "O pH mínimo não pode ser maior que o pH máximo.";
+      return;
+    }
+    if (validMin) {
+      data.ph_min = phMin;
+    }
+    if (validMax) {
+      data.ph_max = phMax;
+    }
+    if (this._settingsPhEntityTouched) {
+      // Only send ph_entity_id when the field was actually edited: an empty
+      // string here is the explicit "disable the gate" value, so it must
+      // never be sent just because the field was left at its default blank
+      // display state.
+      data.ph_entity_id = this._settingsPhEntity;
+    }
+
     this._callService("set_zone_options", data);
     this._closeSettings();
   }
@@ -588,6 +730,29 @@ export class IrrigationScheduleCard extends LitElement {
     return typeof value === "number" && Number.isFinite(value) ? value : undefined;
   }
 
+  private _scheduleWarnings(entity: HassEntity | undefined): Record<string, string> {
+    const value = entity?.attributes.schedule_warnings;
+    if (!value || typeof value !== "object") {
+      return {};
+    }
+    const result: Record<string, string> = {};
+    for (const [id, reason] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof reason === "string") {
+        result[id] = reason;
+      }
+    }
+    return result;
+  }
+
+  private _sensorEntityIds(): string[] {
+    if (!this.hass) {
+      return [];
+    }
+    return Object.keys(this.hass.states)
+      .filter((id) => id.startsWith("sensor."))
+      .sort();
+  }
+
   private _zoneName(sensor: HassEntity): string {
     const configured = this._config.name;
     if (configured && configured.trim()) {
@@ -611,16 +776,14 @@ export class IrrigationScheduleCard extends LitElement {
     return friendly;
   }
 
-  private _locale(): string {
-    return this.hass?.locale?.language || this.hass?.language || "pt-BR";
-  }
-
-  private _nextRunText(state: string, locale: string): string {
+  private _nextRunText(state: string): string {
     const date = new Date(state);
     if (!state || Number.isNaN(date.getTime())) {
       return "Nenhum horário agendado";
     }
-    return new Intl.DateTimeFormat(locale, {
+    // Fixed pt-BR: every other string in this card is hardcoded Portuguese
+    // too (see dayLabels() for why this no longer follows hass.locale).
+    return new Intl.DateTimeFormat("pt-BR", {
       weekday: "short",
       day: "numeric",
       month: "short",
