@@ -126,23 +126,37 @@ export class IrrigationScheduleCard extends LitElement {
   }
 
   protected render(): TemplateResult {
-    if (!this._config.entity) {
+    if (!this.hass) {
       return this._renderConfigError(
-        "Configure o card com o sensor da zona: sensor.<zona>_next_run.",
+        "O card ainda não recebeu o objeto hass do Home Assistant.",
       );
     }
-    if (!this._config.entity.startsWith("sensor.")) {
+    try {
+      if (!this._config.entity) {
+        return this._renderConfigError(
+          "Configure o card com o sensor da zona: sensor.<zona>_next_run.",
+        );
+      }
+      if (!this._config.entity.startsWith("sensor.")) {
+        return this._renderConfigError(
+          `"${this._config.entity}" não é um sensor da integração irrigation_scheduler.`,
+        );
+      }
+      const sensor = this._sensorEntity;
+      if (!sensor) {
+        return this._renderConfigError(
+          `Entidade "${this._config.entity}" não encontrada.`,
+        );
+      }
+      return this._renderCard(sensor);
+    } catch (error) {
+      console.error("[irrigation-schedule-card] render failed", error);
       return this._renderConfigError(
-        `"${this._config.entity}" não é um sensor da integração irrigation_scheduler.`,
+        `Falha ao renderizar o card: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
-    const sensor = this._sensorEntity;
-    if (!sensor) {
-      return this._renderConfigError(
-        `Entidade "${this._config.entity}" não encontrada.`,
-      );
-    }
-    return this._renderCard(sensor);
   }
 
   // ------------------------------------------------------------------
