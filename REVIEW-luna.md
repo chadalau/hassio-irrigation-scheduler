@@ -1,102 +1,60 @@
-# Revisão adversarial — rodada pós-correções
+# Revisão adversarial — estado atual do working tree
 
 ## Arquivos revisados
 
-- `custom_components/irrigation_scheduler/scheduler.py`
-- `custom_components/irrigation_scheduler/store.py`
-- `custom_components/irrigation_scheduler/binary_sensor.py`
-- `custom_components/irrigation_scheduler/sensor.py`
-- `custom_components/irrigation_scheduler/const.py`
-- `custom_components/irrigation_scheduler/__init__.py`
-- `custom_components/irrigation_scheduler/frontend/irrigation-schedule-card.js`
-- `frontend-src/tests/editor.test.ts`
-- Testes de backend em `tests/` e `tests/integration/` (sem alteração)
+- Backend: `custom_components/irrigation_scheduler/__init__.py`, `binary_sensor.py`, `config_flow.py`, `const.py`, `next_run.py`, `schedules.py`, `scheduler.py`, `sensor.py`, `store.py`, `services.yaml`, `manifest.json`, strings/traduções.
+- Frontend: `frontend-src/src/card.ts`, `editor.ts`, `styles.ts`, `types.ts`, `utils.ts`, `const.ts`, configuração Rollup/Vitest e o artefato servido `custom_components/irrigation_scheduler/frontend/irrigation-schedule-card.js`.
+- Testes: `tests/test_next_run.py`, `tests/test_schedules.py`, todos os testes em `tests/integration/`, e `frontend-src/tests/*.test.ts`.
 
 ## Achados
 
-### ALTA — `started_at` naive ainda pode quebrar recovery e histórico
+### Alta
 
-**Status do achado anterior: não corrigido integralmente.**
+1. **Histórico e consumo podem ser duplicados após falha de desligamento.**
+   - **Arquivo/linhas:** `custom_components/irrigation_scheduler/scheduler.py:1093-1122` e `:1549-1598`.
+   - **Cenário/evidência:** se as três tentativas de `turn_off` não confirmarem `off`, o código deliberadamente mantém o runtime store (`remove_state = False`), mas ainda registra o histórico e deduz o reservatório. No boot seguinte, a recuperação de uma execução expirada remove o store e registra a mesma execução novamente, deduzindo o volume outra vez. Isso produz duas regas no histórico e reduz o reservatório duas vezes para uma única execução (além de poder reaparecer como histórico após reinícios repetidos conforme o estado for preservado). O store precisa distinguir “histórico já registrado”/“consumo já deduzido” de “desligamento ainda pendente”, ou a recuperação não deve registrar novamente.
 
-Em `scheduler.py:1458-1469`, somente `finishes_at` é normalizado com
-`dt_util.as_utc()`. Em `:1532-1541`, um `started_at` parseável mas naive é
-atribuído diretamente a `_started_at`. Depois, ao finalizar, `_async_log_history`
-faz `finished_at - started_at` (`:1109`), misturando datetime aware e naive e
-levantando `TypeError`. O mesmo risco existe no caminho de recovery expirado,
-quando `recovered_started_at` naive é passado ao logger (`:1496-1505`).
+### Média
 
-Cenários afetados: store editado/legado com `started_at` sem timezone, tanto
-com run ainda futuro quanto expirado durante downtime. O teste existente
-`test_prune_history_normalizes_naive_started_at_instead_of_raising` cobre apenas
-`_prune_history`, não esses caminhos de recovery.
+1. **Execução persistida antes do `turn_on` pode virar rega fantasma durante recovery.**
+   - **Arquivo/linhas:** `scheduler.py:865-880` e `:1565-1587`.
+   - **Cenário/evidência:** o runtime é salvo antes do comando de acionamento. Se HA cair entre o `async_save_entry` e o `turn_on` (ou o comando falhar e o processo cair antes do cleanup), o boot encontra o registro expirado, observa o alvo desligado, e registra a execução como concluída/deduz volume sem evidência de que houve água. O caminho normal possui `_active_actuated`, mas esse fato não é persistido. O registro deve conter um estado de acionamento confirmado, ou a recuperação deve tratar registros nunca confirmados como abortados.
 
-**Sugestão:** normalizar `started_at` com `dt_util.as_utc()` após o parse, antes
-de armazená-lo/usar em `_coerce_stored_duration` e no logging; tratar valor
-inválido de modo consistente sem permitir exceção na inicialização.
+2. **`refill_reservoir` não é removido ao descarregar a última entry.**
+   - **Arquivo/linhas:** `custom_components/irrigation_scheduler/__init__.py:447-460`.
+   - **Cenário/evidência:** o serviço é registrado na tupla de `:434-444`, mas a lista de `_async_unregister_services` omite `SERVICE_REFILL_RESERVOIR`. Depois de descarregar a última zona, o serviço continua exposto e seu handler antigo permanece registrado; chamadas posteriores falham com “nenhuma entidade”/não têm uma zona válida, em vez de o serviço desaparecer como os demais. Isso deixa estado global obsoleto e quebra o ciclo setup/unload.
 
-### MÉDIA — o atributo de estado `history` continua potencialmente grande
+3. **Consumo do reservatório fica permanentemente zero quando `number_of_pots == 0`.**
+   - **Arquivo/linhas:** `scheduler.py:1192-1200`.
+   - **Cenário/evidência:** a configuração documenta zero como “não configurado” (`scheduler.py:347-360`, `FUNCTIONS.md`), e o frontend trata zero como multiplicador 1 em `frontend-src/src/utils.ts:234-245`. Porém o backend calcula `flow_rate_lph / 3600 * duration * self.number_of_pots`, logo uma zona válida com vazão, reservatório e número de vasos padrão 0 nunca reduz `reservoir_remaining_l`. O cálculo de consumo deve usar pelo menos um vaso quando a quantidade é desconhecida, ou impedir rastreamento até a quantidade ser informada; a semântica precisa ser igual no backend e frontend.
 
-Em `binary_sensor.py:56-66`, `extra_state_attributes` ainda publica a lista
-completa em `"history"`. O limite de `HISTORY_MAX_ENTRIES = 200` e a poda em
-`store.py:41-64` evitam crescimento ilimitado, mas 200 objetos (com timestamps,
-snapshots e metadados) continuam sendo serializados em cada state update,
-duplicados no histórico/recorder e enviados a consumidores do estado. Isso não
-elimina o problema original de payload grande; apenas o torna limitado.
+### Baixa
 
-O frontend usa essa lista em `irrigation-schedule-card.js` (`_historyAttr`),
-portanto a mudança precisa preservar a UX (por exemplo, expor somente uma
-janela pequena no atributo ou migrar a consulta detalhada para outro mecanismo).
-O teste `test_history_caps_at_max_entries` comprova o teto de 200, mas não
-mede tamanho do atributo nem custo de publicação.
-
-## Verificação dos seis pontos solicitados
-
-- **Parada externa sumindo do histórico:** corrigido. O listener marca
-  `_active_actuated` quando observa o alvo ligado (`scheduler.py:1380-1389`),
-  e `_async_finish_run` usa esse marcador antes de limpar o estado
-  (`:969-979`, `:1066-1078`). O teste `test_external_stop_after_real_watering_is_logged_to_history`
-  passou.
-- **Zona presa em “Regando” após falha de I/O no store:** corrigido para falha
-  em `async_save_entry`. O estado é revertido integralmente em
-  `scheduler.py:811-853`, antes de qualquer `turn_on`; o teste
-  `test_start_run_reverts_state_when_store_save_fails` passou.
-- **Snapshot pH/EC perdido no resume:** corrigido. Os campos são persistidos
-  no início (`:812-825`) e restaurados no recovery (`:1547-1556`); o teste
-  `test_resumed_run_that_finishes_normally_logs_restored_ph_ec` passou.
-- **Atributo `history` grande:** apenas parcialmente mitigado. Há retenção de
-  30 dias e teto de 200, mas a lista inteira ainda é atributo do binary sensor.
-- **Recovery removendo store sem confirmação de off:** corrigido. O caminho
-  expirado só remove após `_async_target_is_off()` (`:1487-1493`), e falha,
-  `unknown` ou `unavailable` preserva o registro (`:1515-1522`). Os testes de
-  falha de turn-off e de alvo indisponível passaram.
-- **`started_at` naive:** corrigido somente na poda de histórico
-  (`store.py:51-60`); permanece vulnerável no recovery, conforme achado ALTA.
+1. **Rótulo “Ontem” incorreto em transições de horário de verão.**
+   - **Arquivo/linhas:** `frontend-src/src/utils.ts:417-422`.
+   - **Cenário/evidência:** “ontem” é calculado subtraindo exatamente 24 horas do instante atual. Em uma zona com DST, o dia civil anterior pode estar a 23 ou 25 horas; uma execução do dia civil anterior pode ser rotulada como uma data (`DD/MM`) em vez de `Ontem`, ou o agrupamento semanticamente esperado fica inconsistente. A comparação deve fazer aritmética de calendário no timezone alvo, não aritmética de milissegundos.
 
 ## Falsos positivos percebidos
 
-- A ausência de uma segunda tentativa de actuation-grace no resume não é, por
-  si só, falha: o código verifica o estado imediatamente e mantém o timer de
-  parada.
-- A remoção do store após `turn_off` não é insegura quando o estado atual é
-  explicitamente `off`/`closed`; `unknown`/`unavailable` são corretamente
-  tratados como não confirmados.
-- O teste de cap de histórico não demonstra que o atributo é pequeno; ele
-  demonstra apenas que não cresce sem limite. Não foi contado como correção
-  completa do payload grande.
+- Os testes novos de duração corrompida, NaN/Infinity de pH, atualizações parciais de faixa, conflitos de IDs, recovery defensivo, histórico, reservatório e erros do backend passam; não tratei esses caminhos já cobertos como defeitos sem evidência adicional.
+- A validação do card aceitar inicialmente apenas `sensor.` não é, sozinha, um bypass: o render também exige `switch_entity_id` e `binary_sensor_entity_id` em `card.ts:233-243`.
+- O uso de `turn_off` com retry e retenção do runtime quando o alvo não confirma `off` é uma proteção correta; o defeito é registrar/deduzir antes de resolver a pendência, não a retenção em si.
 
-## Testes e comandos executados
+## Sugestões
 
-- `python -m pytest tests --ignore=tests/integration` — **26 passed, 2 skipped**
-- `& "$env:TEMP\opencode\ha-venv\Scripts\python.exe" -m pytest tests/integration` — **99 passed**
-- `npm run typecheck` — **passou**
-- `npm run test` — **110 passed (3 arquivos)**
-- `npm run build` — **passou**
+- Persistir no runtime flags idempotentes de acionamento confirmado, histórico e dedução, e tornar recovery/finish transações idempotentes.
+- Incluir `SERVICE_REFILL_RESERVOIR` na rotina de unregister e adicionar teste de unload/reload verificando todos os serviços.
+- Centralizar a regra de multiplicador de vasos em helper compartilhado (ou definir explicitamente zero como “um vaso desconhecido”) e cobrir o caso no backend.
+- Adicionar testes com `America/New_York` nos limites de DST para `dayLabelFor`/`groupHistoryByDay`.
+
+## Testes executados
+
+- `$env:TEMP\opencode\irr-venv\Scripts\python.exe -m pytest tests/test_next_run.py tests/test_schedules.py -q` — **28 passed**.
+- `$env:TEMP\opencode\ha-venv\Scripts\python.exe -m pytest tests -q` — **137 passed**.
+- `frontend-src: npm run typecheck` — **passou**.
+- `frontend-src: npm run test` — **132 passed (3 arquivos)**; apenas avisos esperados de Lit em modo dev.
+- `frontend-src: npm run build` — **passou**; artefato gerado em `custom_components/irrigation_scheduler/frontend/irrigation-schedule-card.js`.
 
 ## Status final
 
 # PRECISA DE ALTERAÇÃO
-
-Corrigir a normalização de `started_at` em todos os caminhos de recovery antes
-de aprovar. Também é recomendável reduzir/remover a lista completa do atributo
-de estado; o limite atual evita crescimento infinito, mas não resolve
-integralmente o achado de payload grande.
