@@ -1,137 +1,118 @@
-# REVIEW — irrigation_scheduler (projeto completo)
+# Revisao Consolidada — watergaia
 
-**Status final: APROVADO** · Data: 2026-08-11
+**Status: PRECISA DE ALTERACAO**
 
-> **Nota (2026-08-12):** este documento descreve a revisão do commit inicial.
-> Desde então o projeto ganhou vazão/vasos/reservatório editáveis, um gate de
-> pH opcional por zona, correção do idioma dos dias da semana no card e
-> ajustes de layout — ver [`FUNCTIONS.md`](FUNCTIONS.md) para a referência
-> atualizada e a seção "Adendo" abaixo para o que mudou depois desta revisão.
+## Revisores
 
-## Escopo
-
-Integração custom de Home Assistant `irrigation_scheduler` (1 config entry = 1
-zona de irrigação) + card Lovelace `irrigation-schedule-card`, em inglês como
-padrão com traduções `en`/`pt-BR` completas.
-
-## O que foi validado
-
-| Camada | Verificação | Resultado |
+| Revisor | Modelo | Resultado |
 |---|---|---|
-| Backend puro | `pytest tests/test_next_run.py tests/test_schedules.py` (Python 3.14, sem HA) | 28 passed |
-| Backend + card wiring | `pytest tests -q` (HA 2026.2.3 + PHCC) | 63 passed |
-| Frontend | `npm run typecheck` / `npm run test` / `npm run build` | 0 erros / 49 passed / IIFE 34KB |
-| Sintaxe Python | `py -m compileall -q custom_components` | 0 erros |
+| DeepSeek | `opencode-go/deepseek-v4-flash` | Precisa de alteracao |
+| Luna | `opencode-go/gpt-5.6-luna` | Precisa de alteracao |
+| Qwen | `opencode-go/qwen3.7-max` | Aprovado, mas sem executar a suite HA |
 
-## Histórico de revisão (independente, outro modelo)
+O Qwen aprovou por analise estatica e nao executou os testes de integracao.
+DeepSeek e Luna identificaram o mesmo problema critico de pH. A validacao
+independente confirmou os achados criticos abaixo.
 
-A revisão adversarial independente (DeepSeek V4 Pro) encontrou, e uma segunda
-revisão focada (GPT 5.6 Luna) confirmou, a seguinte classe de bugs — todos
-corrigidos e com testes de regressão:
+## Achados confirmados
 
-1. **CRÍTICO — válvulas `valve` nunca eram acionadas:** `homeassistant.turn_on`
-   não existe para `valve`; o HA só logava warning e retornava sem exceção.
-   Corrigido com mapeamento `valve -> open_valve/close_valve` + `off_states`
-   por domínio (`closed`, não `off`).
-2. **CRÍTICO — `update_schedule` corrompia o `id`:** um uuid novo era injetado
-   no update e sobrescrevia o id armazenado. Corrigido separando `new_schedule`
-   (cria id) de `serialize_schedule`/`merge_schedule_update` (id imutável).
-3. **CRÍTICO — dispositivo assíncrono: válvula aberta sem timer de
-   desligamento:** com Z-Wave/Zigbee/MQTT/válvulas motorizadas o serviço
-   retorna antes do estado mudar. Corrigido com:
-   - timer de parada armado imediatamente após o `turn_on`;
-   - verificação de atuação ADIADA (janela de `ACTUATION_GRACE`), com
-     `turn_off` defensivo e encerramento ruidoso se o alvo nunca atuar;
-   - listener de estado decidindo pelo estado ATUAL (nunca pelo `new_state` do
-     evento) e ignorando `off` durante a janela de atuação — um eco atrasado de
-     um run anterior não mata um run novo.
-4. **ALTO — `turn_off` falho limpava o Store:** agora há retry (3 tentativas,
-   `async_call_later`), confirmação por estado atual, e na falha persistente o
-   Store é PRESERVADO para o restart recovery tentar de novo.
-5. **ALTO — recovery descartava o Store mesmo com `turn_off` defensivo
-   falho:** corrigido — só remove após confirmar o estado `off`.
-6. **ALTO — `RuntimeStore` por entry corrompia o estado entre zonas:**
-   instância única compartilhada + `asyncio.Lock`.
-7. **ALTO — serviços falhavam com alvo device/área:** migrado para
-   `helpers.target.async_extract_referenced_entity_ids`.
-8. **ALTO — race de reentrância:** token `_run_id` em todos os callbacks.
-9. **MÉDIO — `set_schedules` com item não-dict:** `ServiceValidationError` com
-   o índice do item inválido.
-10. **MÉDIO — options corrompidas derrubavam o sensor:** properties
-    defensivas com fallback ao default.
-11. **MÉDIO — normalização de horário no card:** `parseTimeParts` central com
-    limites reais; `toServiceTime("6:5")` → `"06:05:00"`.
-12. **MÉDIO — `setConfig` sem validação:** `validateCardConfig` lança erro
-    claro para config inválida.
+### CRITICO — `NaN` no sensor de pH libera a valvula
 
-## Decisões de arquitetura registradas
+**Arquivo:** `custom_components/irrigation_scheduler/scheduler.py`,
+`_check_ph_gate()`.
 
-- Configuração em `entry.options`; estado volátil de execução em `Store`
-  (`irrigation_scheduler.runtime`). Nunca misturados.
-- `async_update_entry` NÃO recarrega o entry (o update listener só recalcula o
-  próximo disparo — uma rega ativa nunca é interrompida por mudança de
-  options).
-- `next_run.py` e `schedules.py` são módulos puros, testáveis sem HA.
-- O card é um IIFE self-contained (lit embutido) porque o HA 2026.2.3 não
-  expõe import map para `lit`/`home-assistant`; a reatividade usa
-  `this.hass.states`, sem WebSocket manual.
-- O card é servido pelo backend (`async_register_static_paths` +
-  `add_extra_js_url`); sem entrada manual em Resources.
+`float("nan")` nao gera excecao, e as comparacoes `nan < minimo` e
+`nan > maximo` retornam `False`. Assim, o gate retorna permitido e uma rega
+agendada pode ligar a valvula com uma leitura de pH invalida.
 
-## Limitações conhecidas / não testadas
+**Correcao necessaria:** rejeitar valores nao finitos com `math.isfinite()` e
+adicionar testes para `nan`, `NaN` e `-nan`.
 
-- Nenhuma execução em hardware HA real (ambiente de CI não tem dispositivo).
-  O `glue` foi testado contra HA 2026.2.3 via `pytest-homeassistant-custom-component`.
-- `hass_frontend` não é instalável via PyPI; os testes usam o import lazy do
-  frontend e uma fixture que emula o frontend carregado.
+### ALTO — recovery com `duration` corrompido aborta o setup
 
-## Adendo — 2026-08-12
+**Arquivo:** `custom_components/irrigation_scheduler/scheduler.py`,
+`_async_recover_state()`.
 
-Mudanças feitas depois da revisão original acima, nesta sessão:
+O codigo executa `int(run_state["duration"])` sem validar o valor. Um Store
+corrompido com `duration: "abc"` causa `ValueError` durante o setup da zona.
+Nesse caminho nao ocorre desligamento defensivo e a integracao pode nao carregar.
 
-1. **Gate de pH opcional por zona:** `ph_entity_id`/`ph_min`/`ph_max` em
-   `entry.options`, configuráveis via config flow, options flow, serviço
-   `set_zone_options` e o painel de settings do próprio card. Só afeta regas
-   **agendadas** (`_async_schedule_fired` → `_check_ph_gate`); `water_now` é
-   sempre um override manual e ignora o gate, por decisão explícita do
-   usuário. É falha-segura: sensor ausente/indisponível/valor não numérico
-   bloqueia a rega (nunca rega "às cegas"). Um horário pulado fica marcado em
-   `schedule_warnings` (em memória, não persiste a restart) até a próxima vez
-   que aquele horário regar com sucesso; o card mostra um ícone `!` na linha
-   do horário com o motivo no tooltip.
-2. **Correção — dias da semana em inglês mesmo com HA em pt-BR:** o card
-   inteiro é hardcoded em português (diálogos, botões, erros), exceto
-   `dayLabels`/`allDaysLabel`/a data do próximo horário, que seguiam
-   `hass.locale.language`. Essa localização parcial é a causa raiz do bug
-   relatado — corrigido fixando tudo em pt-BR (`utils.ts`, `card.ts`).
-3. **Correção — layout do card:** linha de horário reestruturada em duas
-   linhas (dias em cima; duração/switch/ações embaixo) para não "encavalar"
-   quando há vários dias selecionados; botões "Adicionar horário"/"Regar
-   agora" agora dividem a largura igualmente em vez de ficarem
-   desproporcionais.
-4. Achados da análise de código anterior corrigidos: descrição do serviço
-   `set_zone_options` no `services.yaml` agora menciona o reservatório;
-   `manifest.json` em `0.2.0`; cobertura de teste do card (`card.test.ts`)
-   ampliada além de `setConfig`/`validateCardConfig`.
+**Correcao necessaria:** validar `started_at`, `duration`, timezone e coerencia
+do payload. Em payload invalido, executar recovery fail-safe sem derrubar o
+setup da zona.
 
-**Validação (2026-08-12):**
+### MEDIO — schedule corrompido mata a cadeia de agendamento
 
-| Camada | Verificação | Resultado |
-|---|---|---|
-| Backend puro | `pytest tests/test_next_run.py tests/test_schedules.py` | 28 passed |
-| Backend + HA | `pytest tests -q` (HA 2026.2.3 + PHCC) | 77 passed |
-| Frontend | `npm run typecheck` / `npm run test` / `npm run build` | 0 erros / 63 passed / bundle idêntico ao build limpo |
+**Arquivo:** `custom_components/irrigation_scheduler/scheduler.py`,
+`_async_schedule_fired()`.
 
-## Comandos reproduzíveis
+Um horario com `duration: "abc"` causa `ValueError` antes de
+`_reschedule_next()`. Como o timer e one-shot, a zona pode deixar de agendar
+novas regas ate restart ou alteracao manual das options.
 
-```powershell
-# Backend (requer venv com HA 2026.2.3 + PHCC)
-& "$env:TEMP\opencode\ha-venv\Scripts\python.exe" -m pytest tests -q
+**Correcao necessaria:** validar e filtrar schedules corrompidos, e garantir
+`_reschedule_next()` em `finally` no callback.
 
-# Módulos puros (qualquer Python)
-python -m pytest tests/test_next_run.py tests/test_schedules.py
+### MEDIO — atualizacao parcial pode inverter faixa de pH
 
-# Frontend
-cd frontend-src
-npm run typecheck; npm run test; npm run build
-```
+**Arquivo:** `custom_components/irrigation_scheduler/__init__.py`,
+`_validate_ph_range()`.
+
+O servico aceita `ph_min` e `ph_max` individualmente, mas compara apenas os
+valores presentes na mesma chamada. Uma chamada parcial que altere somente
+`ph_min` pode salvar `ph_min > ph_max` usando o limite antigo.
+
+**Correcao necessaria:** combinar options atuais com o patch antes de validar,
+ou exigir os dois limites quando qualquer limite for alterado.
+
+### MEDIO — semantica da vazao precisa ser explicita
+
+O card calcula `flow_rate_lph` como vazao **por vaso** e multiplica pelo numero
+de vasos para chegar ao total. Isso esta de acordo com a solicitacao atual,
+mas labels como `Vazao (L/h)` podem ser interpretadas como vazao total da zona.
+
+**Correcao/documentacao necessaria:** usar `Vazao por vaso (L/h)` no config flow,
+options, servico, card e README. Adicionar teste de contrato, por exemplo:
+8 L/h, 12 vasos e 900 segundos = 2 L por vaso e 24 L totais.
+
+## Achados menores confirmados
+
+- `set_schedules` sem a chave `schedules` gera `KeyError` cru.
+- O teste de unload nao lista `SERVICE_SET_ZONE_OPTIONS` em `ALL_SERVICES`.
+- O card pode chamar `set_zone_options` com payload vazio ao salvar sem alteracao.
+- `reservoir_volume_l` e metadata para uso futuro; ainda nao reduz rega nem gera alerta.
+- O selector de pH aceita qualquer entidade do dominio `sensor`; o gate falha
+  fechado se o valor nao for numerico.
+- O Store de recovery ainda deve validar o tipo de `duration` antes de retomar.
+
+## Pontos aprovados
+
+- Timer de desligamento e armado imediatamente depois do `turn_on`.
+- Janela de atuacao, token `_run_id`, retry de `turn_off` e preservacao do Store
+  foram confirmados como corretos.
+- Gate de pH nao interfere em `water_now`, que e um override manual explicito.
+- Contrato sensor -> card esta alinhado, incluindo vazao, vasos, reservatorio
+  e campos de pH.
+- Servicos por entidade, dispositivo e area continuam cobertos.
+
+## Testes executados
+
+| Suite | Resultado |
+|---|---|
+| Backend HA 2026.2.3 + PHCC | **77 passed** |
+| Backend puro | **28 passed** |
+| Frontend Vitest | **63 passed** |
+| Frontend typecheck | **0 erros** |
+| Frontend build | **OK** |
+
+Os testes atuais passam, mas ainda nao cobrem os cenarios `NaN`, Store com
+`duration` invalido, schedule corrompido e patch parcial de pH. Por isso a
+revisao nao esta aprovada.
+
+## Proxima rodada recomendada
+
+1. Corrigir o bypass `NaN` do pH gate.
+2. Tornar recovery e schedules defensivos contra payload corrompido.
+3. Validar faixa de pH usando options atuais + patch.
+4. Clarificar a unidade `L/h por vaso`.
+5. Adicionar testes de regressao e executar novamente os tres reviewers.
