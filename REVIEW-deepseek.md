@@ -1,16 +1,12 @@
 # REVIEW-deepseek.md — Revisão adversarial independente (deepseek-v4-flash)
 
 **Status final: PRECISA DE ALTERAÇÃO**
-**Data:** 2026-08-12 · **Ambiente:** Windows, HA 2026.2.3 + PHCC (venv `%TEMP%\opencode\ha-venv`), Python 3.13/3.14, Node 22 + Vitest/Rollup
+**Data:** 2026-08-12 · **Ambiente:** Windows, HA 2026.2.3 + PHCC (venv `%TEMP%\opencode\ha-venv`), Python 3.13/3.14, Node 24 + Vitest/Rollup
 
-> **Nota sobre o estado do repositório:** a premissa da solicitação ("alterações não
-> commitadas e arquivo não rastreado `tests/integration/test_ph_gate.py`") **não
-> corresponde ao estado real**: `git status` está limpo e `test_ph_gate.py` já está
-> commitado no HEAD (`7579c4d feat: add optional per-zone pH gate ...`, que também
-> contém todo o gate de pH, card, strings, testes e docs). Esta revisão cobre o HEAD
-> inteiro. Há dois arquivos de revisão de outros modelos na raiz, **não rastreados**:
-> `REVIEW-luna.md` (PRECISA DE ALTERAÇÃO) e `REVIEW-qwen37.md` (APROVADO). Meus testes
-> empíricos **confirmam o Luna** e **refutam o Qwen37** nos pontos críticos (ver §4).
+Revisão independente do código **atual** (working tree), sem comparar com outros
+reviewers e sem ler os demais `REVIEW*.md`. Nenhum arquivo de produção/teste foi
+alterado; os testes adversariais foram executados a partir de diretório temporário
+fora do workspace e removidos em seguida.
 
 ---
 
@@ -19,97 +15,133 @@
 ### Backend `custom_components/irrigation_scheduler/`
 | Arquivo | Papel |
 |---|---|
-| `__init__.py` (467 linhas) | Setup, serviços (7), frontend wiring, resolução de alvos |
-| `scheduler.py` (1066) | Motor de agendamento, lifecycle da rega, gate de pH, recovery |
+| `__init__.py` (468) | Setup, 7 serviços, frontend wiring, resolução de alvos, schemas voluptuous |
+| `scheduler.py` (1440) | Motor de agendamento, lifecycle da rega, gate de pH, recovery, history |
 | `next_run.py` (176) | Cálculo puro do próximo horário (zero imports HA) |
-| `schedules.py` (65) | Serialização/imutabilidade de id |
-| `store.py` (78) | Persistência volátil do runtime (lock compartilhado) |
-| `sensor.py` (151) | Sensor `next_run` + contrato de atributos do card |
+| `schedules.py` (65) | Serialização / imutabilidade de id |
+| `store.py` (141) | Persistência volátil (runtime + history, lock compartilhado) |
+| `sensor.py` (152) | Sensor `next_run` + contrato de atributos do card |
 | `switch.py` (73) | Switch `schedule_enabled` |
-| `binary_sensor.py` (79) | Binary sensor `watering` |
-| `config_flow.py` (337) | Config/options flow (vazão, vasos, reservatório, pH) |
+| `binary_sensor.py` (81) | Binary sensor `watering` + atributos de history |
+| `config_flow.py` (355) | Config/options flow (durations, vazão, vasos, reservatório, pH, EC) |
 | `const.py`, `manifest.json`, `services.yaml`, `strings.json`, `translations/{en,pt-BR}.json`, `frontend/irrigation-schedule-card.js` | Contratos e metadados |
 
-### Frontend `frontend-src/src/`
-`card.ts` (980), `editor.ts` (67), `utils.ts` (254), `types.ts` (98), `const.ts`, `styles.ts`, `rollup.config.mjs`, `package.json`, `tsconfig.json`, `vitest.config.ts`, `tests/{utils,card}.test.ts`.
+### Frontend `frontend-src/`
+`src/{card.ts (1291), editor.ts, utils.ts (338), types.ts, const.ts, styles.ts}`, `rollup.config.mjs`, `smoke.mjs`, `package.json`, `tsconfig.json`, `vitest.config.ts`, `tests/{utils,editor,card}.test.ts`.
 
 ### Testes
-`tests/test_next_run.py`, `tests/test_schedules.py`, `tests/pure_loader.py`, `tests/integration/{conftest.py, test_init.py, test_services.py, test_recovery.py, test_async_device.py, test_config_flow.py, test_frontend.py, test_ph_gate.py}`.
+`tests/{test_next_run.py, test_schedules.py, pure_loader.py}`, `tests/integration/{conftest.py, test_init.py, test_services.py, test_recovery.py, test_async_device.py, test_config_flow.py, test_frontend.py, test_ph_gate.py, test_history.py}`.
 
 ### Documentação
-`README.md`, `FUNCTIONS.md`, `hacs.json`, `pytest.ini`, `.gitignore`.
+`README.md`, `FUNCTIONS.md`, `hacs.json`, `pytest.ini`, `requirements-test.txt`.
 
 ---
 
 ## 2. Achados por severidade
 
-### CRÍTICO
-
-#### C1. Leitura de pH `nan`/`NaN` libera um disparo agendado (válvula abre) — viola o fail-safe
-- **Arquivo:** `scheduler.py`, `_check_ph_gate()` (linhas 843-873).
-- **Cenário/evidência (reproduzido em runtime):** com `ph_entity_id` configurado, `ph_min=5.5`, `ph_max=6.5` e o sensor reportando `"nan"`, `"NaN"` ou `"NAN"`, o `float()` não lança exceção, `nan < 5.5` e `nan > 6.5` são ambos `False`, e o gate retorna `(True, None)` → `homeassistant.turn_on` é chamado e a válvula é aberta. Confirmei com teste adversarial (mock `turn_on` executado; log `Watering started ... source=schedule`). `"inf"`/`"-inf"` são bloqueados corretamente — só `nan` vaza. O docstring promete fail-safe para "valor não parseável"; `nan` é um valor não finito e o comentário/strings tratam leituras fora de escala como bloqueio.
-- **Impacto:** com um sensor que serialize NaN (floats IEEE em template/template integrations, etc.), o agendamento rega fora da faixa, contrariando o requisito explícito do commit.
-- **Sugestão:** exigir `math.isfinite(value)` após o `float()` (ou validar `PH_SCALE_MIN <= value <= PH_SCALE_MAX` com isfinite) antes das comparações; adicionar casos `nan`/`NaN`/`-nan` ao teste `test_scheduled_run_skipped_when_ph_sensor_unusable`.
-
 ### ALTO
 
-#### A1. Recovery com `duration` corrompido no store derruba o setup da zona (sem desligamento defensivo)
-- **Arquivo:** `scheduler.py`, `_async_recover_state()` (linha 1003).
-- **Cenário/evidência (reproduzido):** store com `finishes_at` futuro e `duration: "abc"` → `int("abc")` lança `ValueError` dentro de `async_setup` → `Error setting up entry Garden for irrigation_scheduler`; a zona não carrega e **nenhum `turn_off` defensivo é tentado** (o target pode ter ficado aberto). `started_at` também é atribuído sem validar (`parse_datetime` pode retornar `None`). O mesmo rigor defensivo já existe para `finishes_at`; falta para os demais campos.
-- **Impacto:** em um mecanismo de irrigação, um store corrompido (corte de energia/edição manual) pode deixar a válvula aberta com o mecanismo de recovery fora do ar.
-- **Sugestão:** validar `started_at` (tz-aware, coerente com `finishes_at`) e `duration` (int positivo, clamp `[MIN_DURATION, MAX_SCHEDULE_DURATION]`); em payload inválido, tentar desligamento defensivo, confirmar estado off e então remover o registro — sem abortar o setup.
+#### A1. Options flow apaga silenciosamente o `ph_entity_id`/`ec_entity_id` configurado ao salvar só as durações
+- **Arquivo:** `config_flow.py`, `IrrigationSchedulerOptionsFlow.async_step_init` (linhas 247-262).
+- **Cenário/evidência (reproduzido no harness PHCC):** com uma zona configurada com
+  `ph_entity_id="sensor.reservoir_ph"`, `ph_min=5.5`, `ph_max=6.5` e
+  `ec_entity_id="sensor.reservoir_ec"`, abrir o options flow e salvar **apenas** as
+  durações (campos pH/EC não tocados — chaves ausentes em `user_input`, como o frontend
+  se comporta para campos `vol.Optional` sem `default`) resulta em:
+  `ph_entity_id=''` e `ec_entity_id=''` persistidos (teste adversarial confirmou). A
+  causa é `user_input.get(CONF_PH_ENTITY_ID) or DEFAULT_PH_ENTITY_ID` (e o mesmo para EC):
+  a chave ausente vira `""`, sobrescrevendo a opção existente. O teste existente
+  (`test_options_flow_changes_durations_without_reload_or_interrupt`) **não** assere a
+  preservação de pH/EC e, portanto, não pega a regressão.
+- **Impacto:** o gate de pH é desabilitado silenciosamente (regas agendadas passam a
+  ocorrer fora da faixa de pH sem nenhum aviso) e o badge de EC desaparece. Perda de
+  configuração sem feedback.
+- **Sugestão:** preservar o valor atual quando a chave está ausente, ex.:
+  `user_input.get(CONF_PH_ENTITY_ID, current_ph_entity)` (sem o `or DEFAULT`, que é o
+  que destrói `""` legítimo); adicionar teste que salva sem tocar nos campos de pH/EC e
+  assere a preservação.
+
+#### A2. Alvo que atua DEPOIS do aborto por grace fica ligado para sempre (sem safety net)
+- **Arquivo:** `scheduler.py`, `_async_actuation_check_fired` (985-1032) e `_async_finish_run` (781-918).
+- **Cenário/evidência (reproduzido):** `water_now` em device assíncrono lento; o
+  `turn_on` é despachado; ao fim do grace (15 s) o alvo ainda está `off` →
+  `_async_actuation_check_fired` envia turn_off defensivo, chama `_async_finish_run(
+  turn_off=False, remove_state=True, log_history=False)` e cancela todos os timers. Se o
+  dispositivo atuar **depois** do aborto (ex.: em t=+20 s, após retry de rota/mesh), o
+  alvo fica **ON com nenhum timer, nenhuma entrada no store e nenhum listener reagindo**
+  (`_async_target_state_changed` retorna pois `_is_watering` é False). Avançando o relógio
+  em 1 h, o estado permanece `on` com 0 turn_off adicionais. Violação da invariante
+  documentada: *"There must never be a window in which a turn_on was sent without a timer
+  that will turn the target off"* — a janela existe para atuações tardias.
+- **Impacto:** válvula aberta indefinidamente (rega ininterrupta) em dispositivos com
+  atuação >15 s após o comando, sem qualquer recuperação (nem restart: store vazio).
+- **Sugestão:** após o aborto por grace, manter uma janela de vigilância estendida que
+  observe o alvo (ex.: re-armar um "watchdog" curto que reenvie turn_off enquanto o alvo
+  estiver ON sem run ativo), ou manter o estado no store até o alvo ser **confirmado**
+  `off`/`closed` (consistente com a filosofia de `_async_finish_run`/`_async_recover_state`).
 
 ### MÉDIO
 
-#### M1. Duração corrompida de um horário mata a cadeia de agendamento silenciosamente
-- **Arquivo:** `scheduler.py`, `_async_schedule_fired()` (linha 837) e `_async_start_run()` (linha 534).
-- **Cenário/evidência (reproduzido):** com um schedule `duration: "not-a-number"` nas options, o disparo lança `ValueError: invalid literal for int()`. Como `self._reschedule_next()` (linha 841) fica **depois** da chamada, ele nunca executa; o timer era one-shot; o resultado é `ERROR ... Task exception was never retrieved` e a zona **nunca mais agenda** até restart ou mudança de options. A property `schedules` filtra apenas itens não-dict, não tipos de campo inválidos — inconsistente com o espírito defensivo do resto do código (ex.: `_duration_option`).
-- **Impacto:** falha em regar (fails closed), mas silenciosa e permanente até intervenção manual.
-- **Sugestão:** validar `duration` na property `schedules` (int, range) ou fazer `_async_schedule_fired`/`_async_start_run` usarem um coerce defensivo e sempre executar `_reschedule_next()` em `finally`.
-
-#### M2. `set_zone_options` parcial pode inverter a faixa de pH silenciosamente
-- **Arquivo:** `__init__.py`, `_validate_ph_range()` (linhas 123-134).
-- **Cenário/evidência (reproduzido):** após `ph_min=5.5, ph_max=6.5`, uma chamada só com `ph_min=7.0` é aceita e persiste `7.0..6.5`; o serviço documenta campos independentemente opcionais e o card envia alterações parciais. O gate então bloqueia **todas** as regas agendadas (fail-safe, nunca abre a válvula) até correção manual — uma armadilha de configuração que desativa uma zona sem erro visível.
-- **Sugestão:** validar o **estado efetivo** (opções atuais + patch) antes de salvar, ou exigir ambos os limites em qualquer alteração de pH.
-
-#### M3. Semântica de vazão "por vaso" ambígua na UI/docs backend (risco de volume total superestimado)
-- **Arquivo:** `utils.ts` (`waterVolume`/`totalVolumeMl`), `services.yaml` ("liters per hour"), `config_flow.py` ("Vazão (L/h)"), `card.ts`.
-- **Cenário:** o cálculo trata `flow_rate_lph` como **vazão por vaso** e multiplica por `number_of_pots` no total. A UI/`services.yaml` só dizem "L/h", sem "por vaso" (apenas `FUNCTIONS.md` documenta). Um usuário que informar a vazão total da linha verá um volume total `pots` vezes maior.
-- **Impacto:** exibição incorreta (sem impacto de segurança — é só o card).
-- **Sugestão:** rotular "L/h por vaso" no config flow, options flow, services.yaml e card; adicionar teste de regressão de contrato (ex.: vazão 8 L/h, 12 vasos, 900 s → 2 L/vaso, 24 L total).
+#### M1. Rega que nunca atuou é registrada no history como "concluída"
+- **Arquivo:** `scheduler.py`, `_async_finish_run` (log_history padrão `True`, linhas 781-918), `_async_stop_timer_fired` (981-983), armadura dos timers em `_async_start_run` (750-769).
+- **Cenário/evidência (reproduzido):** dois gatilhos confirmados:
+  1. **Rega curta (duração < `ACTUATION_GRACE`, ex. 5 s) com alvo morto:** o stop timer é
+     armado **antes** do actuation check e ambos disparam no mesmo instante
+     (`grace == finishes_at`). O stop timer vence a corrida, chama
+     `_async_finish_run(turn_off=True, remove_state=True)` com `log_history=True` e
+     **cancela** o actuation check → um registro `{duration: 0, ...}` entra no history
+     mesmo sem uma gota ter sido entregue.
+  2. **`stop` manual durante a janela de grace** de um alvo que nunca atuou:
+     `_async_stop` → `_async_finish_run(turn_off=True, remove_state=True)` → registro
+     `{duration: 0}` confirmado.
+- **Impacto:** viola a invariante documentada ("a run that never actuates ... is
+  deliberately NOT logged") e polui o histórico/card (linha "Última rega" e estatísticas
+  com entradas falsas de 0 s/0 ml).
+- **Sugestão:** em `_async_finish_run`, logar history apenas quando a atuação foi
+  confirmada em algum momento (ex.: checar `_async_target_is_actuated()` ou guardar um
+  flag `_actuation_confirmed` setado pelo actuation check); para regas curtas, agendar o
+  actuation check **antes** do stop timer ou tratá-lo como o decisor.
 
 ### BAIXO
 
 | ID | Achado | Evidência |
 |---|---|---|
-| B1 | `set_schedules` sem a chave `schedules` lança `KeyError` cru em vez de `ServiceValidationError` | `__init__.py` linha 366 (`data[CONF_SCHEDULES]`); reproduzido (exceção genérica) |
-| B2 | Campo pH no settings panel do card "reverte" visualmente ao limpar | `card.ts` linha 481: `.value=${this._settingsPhEntity \|\| phEntityId}` — `""` é falsy; o `_settingsPhEntityTouched` garante o envio correto de `""`, mas o usuário vê o valor antigo no input |
-| B3 | `ALL_SERVICES` em `test_init.py` omite `SERVICE_SET_ZONE_OPTIONS` (lacuna de teste) | `test_init.py` linhas 32-39 (6 serviços); `__init__.py` remove corretamente os 7 |
-| B4 | `_saveSettings` chama `set_zone_options` mesmo sem nenhuma alteração | `card.ts` linha 610 (`data = {}`); sem side effect, mas chamada de serviço desnecessária |
-| B5 | `reservoir_volume_l` é metadata-only (nunca consumido pelo backend) | `scheduler.py`/`FUNCTIONS.md` ("uso futuro"); documentar como informativo para não sugerir proteção inexistente |
-| B6 | Config/options flow aceitam qualquer `sensor.*` como pH (selector do HA não filtra `device_class: ph`) | `config_flow.py` linhas 141-143/308-313; sem risco (fail-safe), mas UX enganosa |
-| B7 | `add_schedule`/`set_schedules` podem criar ids duplicados (sem dedupe) | `__init__.py` `SCHEDULE_SCHEMA` aceita id opcional; `new_schedule` mantém id fornecido |
-| B8 | `update_schedule`/`remove_schedule` com id inexistente são no-ops silenciosos | `scheduler.py` `async_update_schedule`/`async_remove_schedule` |
-| B9 | Card formata o "próximo horário" no fuso do browser, que pode diferir do fuso do HA | `card.ts` `_nextRunText` (Intl do browser); exibição |
-| B10 | Recovery resumido não rearma o actuation check (target que ficou off durante downtime não é detectado) | `scheduler.py` `_async_recover_state` arma só o stop timer |
+| B1 | O card engole erros de validação do backend | `card.ts` `_callService` (1122-1135) só faz `console.error`; `_saveDialog` (1207-1221) e `_saveSettings` fecham o diálogo sem feedback. Ex.: duração > 86400 s no diálogo, ou `default_duration > max_duration` no painel de settings → `ServiceValidationError`/`MultipleInvalid` no servidor, silenciosos para o usuário. O input de minutos do diálogo não tem `max` (linha 886), permitindo valores inválidos que o cliente não valida. |
+| B2 | `_async_abort_run` remove o store incondicionalmente, mesmo se o turn_off defensivo falhar | `scheduler.py` 966-979: se `turn_on` lançar (parcialmente atuado) e o turn_off defensivo também falhar, o registro é apagado — inconsistente com `_async_finish_run`/`_async_recover_state`, que **preservam** o store quando o off não é confirmado (safety net de restart). |
+| B3 | Domínio alvo não suportado (config corrompida) deixa a zona "watering" travada | `scheduler.py` 714: `resolve_target_services(self.target_domain)` lança `ValueError` **depois** do save no store (700-712) e **antes** do `try/except` do turn_on → `_is_watering=True` sem timers; zona fica "Regando" até restart. Apenas com `entry.data` editada à mão (config flow restringe os 4 domínios). |
+| B4 | Comentário incorreto sobre schemas "estritos" | `__init__.py` 158-160: "the schemas are strict and reject extra keys" — `vol.Schema` usa `ALLOW_EXTRA` por padrão; campos desconhecidos (ex.: `ph_minn: 7` em `set_zone_options`) são **ignorados silenciosamente** (vira no-op). Sugestão: `extra=vol.PREVENT_EXTRA` ou corrigir o comentário. |
 
 ---
 
-## 3. Falsos positivos percebidos / pontos aprovados
+## 3. Falsos positivos percebidos / pontos verificados e aprovados
 
-- **Gate de pH restrito a agendados; `water_now` como override manual explícito** — correto por design e testado (`test_water_now_ignores_ph_gate`).
-- **Timer de desligamento armado imediatamente após o `turn_on`, antes de qualquer verificação** — correto; sem janela de "válvula aberta sem timer".
-- **Listener decide pelo estado atual (não pelo `new_state` do evento) + token de geração `_run_id` + janela de `ACTUATION_GRACE`** — correto; testado (stale off echo, device lento, nunca-atuante).
-- **`turn_off` não confirmado preserva o store para restart recovery** — correto e testado.
-- **`RuntimeStore` único compartilhado com `asyncio.Lock`** — correto; teste de duas zonas simultâneas passa.
-- **`ph_entity_id=""` como valor explícito de desabilitação** (distinto de "não alterado" `None`) — correto e testado.
-- **`update_schedule` preserva o id** (`merge_schedule_update` ignora `id`) — correto e testado.
-- **Validação `ph_min > ph_max` na mesma chamada** — funciona; a lacuna real é o estado parcial (M2).
-- **`"inf"`/`"-inf"` no gate de pH são bloqueados** — verificado em runtime (bloqueio correto).
-- **Traduções `en`/`pt-BR` sincronizadas com `strings.json`** — 79/79 chaves, 0 faltando/sobrando.
-- **`UpdateListenerType = Callable[[HomeAssistant, ConfigEntry], Coroutine]` no HA 2026.2.3** — assinatura do `_async_update_listener` confere.
-- **`ha-switch` com `checked`/`change`** — API legada, mantida compatível no frontend do HA; sem quebra funcional esperada.
-- **Sem regressões na cadeia de schedule/enabled/set_schedules com options corrompidas** — `test_corrupt_duration_options_fall_back_to_defaults` passa.
+- **pH `nan`/`NaN`/`-nan` liberando a rega (CRÍTICO da rodada anterior):** **CORRIGIDO**.
+  `_check_ph_gate` exige `math.isfinite(value)` (1106-1114) e o teste parametrizado
+  cobre `nan`, `NaN`, `-nan`, `inf`, `-inf`. Verificado em runtime.
+- **Recovery com `duration` corrompido derrubando o setup (A1 anterior):** **CORRIGIDO**.
+  `_coerce_stored_duration` (1359-1387) recalcula/clampa; o stop timer é armado contra
+  `finishes_at`, nunca contra `duration`. `test_corrupt_duration_in_store_does_not_abort_setup` passa.
+- **Horário com `duration` corrompida matando a cadeia de agendamento (M1 anterior):**
+  **CORRIGIDO**. `schedules` filtra duration não-int/fora de faixa (233-248) e
+  `_async_schedule_fired` roda `_reschedule_next()` em `finally` (1080-1081).
+- **`set_zone_options` parcial invertendo a faixa de pH (M2 anterior):** **CORRIGIDO**.
+  Validação do **estado efetivo** (548-555); teste de regressão presente.
+- **`set_schedules` sem `schedules` / item não-dict (B1 anterior):** **CORRIGIDO**.
+  `ServiceValidationError` nomeando o índice; teste presente.
+- **`update_schedule`/`remove_schedule` no-ops silenciosos (B8 anterior) e ids
+  duplicados (B7 anterior):** **CORRIGIDOS** — agora lançam erro e geram id fresco.
+- **Timer de desligamento armado imediatamente após o turn_on:** correto e testado
+  (stop timer antes do actuation check; `test_stop_timer_armed_before_deferred_actuation_check`).
+- **Listener decide pelo estado atual + token de geração `_run_id` + janela de grace:**
+  correto e bem testado (stale off echo, slow device, nunca-atuante, corrida stop/turn_off).
+- **Turn_off não confirmado preserva o store (restart recovery):** correto e testado.
+- **`RuntimeStore` único compartilhado com lock:** correto; duas zonas simultâneas não se clobberam.
+- **Gate de pH só em regas agendadas; `water_now` é override explícito:** por design e testado.
+- **`ph_entity_id=""` explícito ≠ `None` (não altera):** correto e testado.
+- **`merge_schedule_update` preserva o id:** correto e testado.
+- **Bundle frontend consistente com o fonte:** o artefato buildado contém os marcadores
+  do código atual (badges pH/EC, `schedule_warnings`, settings panel); smoke test OK.
+- **Traduções `en`/`pt-BR` e `strings.json`/`services.yaml`:** consistentes entre si.
 
 ---
 
@@ -123,54 +155,44 @@
 ### Backend + HA (venv `ha-venv`, HA 2026.2.3 + PHCC)
 | Comando | Resultado |
 |---|---|
-| `pytest tests -q` | **77 passed** |
-
-> **Barrreira de ambiente removida para a execução:** a suíte de integração falhava em
-> setup (`FileNotFoundError` no `shutil.copy2` do `conftest.py`) porque o artefato
-> buildado `custom_components/irrigation_scheduler/frontend/irrigation-schedule-card.js`
-> estava como **placeholder cloud-only do OneDrive** (não legível localmente; `attrib`
-> e `Test-Path` confirmam). Reconstruí o bundle a partir do fonte (`npm run build`) e
-> verifiquei que o arquivo resultante é **byte-idêntico ao blob do HEAD**
-> (`git hash-object` = `2ab75e4784c920c5e528d3b9888485e8fd328625` antes e depois) — a
-> árvore de trabalho continua limpa. A causa é ambiental (OneDrive), não do código;
-> `REVIEW.md`/`REVIEW-luna.md` já registravam 77 passed em execução anterior.
+| `pytest tests -q` | **100 passed** |
 
 ### Frontend (`frontend-src/`)
 | Comando | Resultado |
 |---|---|
 | `npm run typecheck` | **0 erros** |
-| `npm run test` | **63 passed** (2 arquivos) |
-| `npm run build` | **OK** — bundle idêntico ao HEAD (determinístico) |
-| `python -m compileall -q custom_components/irrigation_scheduler` + imports | **OK** |
+| `npm run test` (vitest) | **87 passed** (3 arquivos) |
+| `node smoke.mjs` (bundle buildado) | **SMOKE OK** |
 
-### Testes adversariais adicionais (temporários, criados e removidos — sem rastro)
-Confirmei em runtime, com mock do PHCC e o scheduler real:
-
+### Testes adversariais (temporários, em `%TEMP%\opencode\adv_review`, removidos após a execução)
 | Cenário testado | Resultado |
 |---|---|
-| pH `"nan"`, `"NaN"`, `"NAN"` → rega agendada | **FALHA confirmada** — válvula abriu (bug C1) |
-| pH `"inf"` / `"-inf"` | Bloqueado corretamente |
-| Recovery com `duration: "abc"` no store | **FALHA confirmada** — `ValueError`, setup da zona aborta (bug A1) |
-| Schedule com `duration: "not-a-number"` | **FALHA confirmada** — `ValueError` no `_async_schedule_fired`, cadeia de agendamento morre (bug M1) |
-| `set_schedules` sem chave `schedules` | **FALHA confirmada** — exceção crua (KeyError) |
-| `set_zone_options` parcial `ph_min=7.0` sobre `5.5..6.5` | **FALHA confirmada** — faixa invertida aceita silenciosamente (bug M2) |
+| Rega curta (5 s) + alvo que nunca atua → history | **FALHA confirmada** — registro `duration:0` gravado (M1.1) |
+| `stop` manual durante o grace de alvo nunca-atuante → history | **FALHA confirmada** — registro `duration:0` gravado (M1.2) |
+| Alvo atua após o aborto por grace → safety net | **FALHA confirmada** — alvo fica `on` para sempre, 0 turn_off, store vazio (A2) |
+| Options flow salvando só durações → pH/EC | **FALHA confirmada** — `ph_entity_id`/`ec_entity_id` apagados para `''` (A1) |
+| `turn_on` lança + turn_off defensivo falha → store | Comportamento confirmado (store removido; flag B2) |
 
-O arquivo temporário `tests/integration/test_zz_adversarial_tmp.py` foi removido após a
-execução; `git status` permanece limpo (apenas `REVIEW-luna.md` e `REVIEW-qwen37.md`
-não rastreados, pré-existentes).
+O workspace não foi alterado por esta revisão (nenhum arquivo de produção/teste tocado;
+apenas este `REVIEW-deepseek.md` foi sobrescrito).
 
 ---
 
-## 5. Divergência entre as revisões prévias
+## 5. Sugestões priorizadas
 
-| Achado | Luna (`REVIEW-luna.md`) | Qwen37 (`REVIEW-qwen37.md`) | Esta revisão (empírico) |
-|---|---|---|---|
-| pH `nan` abre a válvula | CRÍTICO (estático) | "nenhum crítico" (não testou) | **CONFIRMADO** (CRÍTICO) |
-| Recovery com duration corrompido | ALTO (estático) | B5 "teórico, baixo impacto" | **CONFIRMADO** (ALTO) — setup aborta |
-| Duração de schedule corrompida mata agendamento | não destacado | não destacado | **CONFIRMADO** (MÉDIO) |
-| Inversão parcial da faixa de pH | MÉDIO | não destacado | **CONFIRMADO** (MÉDIO) |
-| Vazão por vaso ambígua | MÉDIO | não destacado | MÉDIO (concordo) |
-| M1/M2/M3 (card visual, ALL_SERVICES, save vazio) | — | MÉDIA/BAIXA | Confirmados como BAIXO |
+1. **A1 (config_flow.py):** preservar a opção existente quando a chave está ausente no
+   options flow (`user_input.get(CONF_PH_ENTITY_ID, current_ph_entity)` e idem EC) e
+   adicionar teste de regressão.
+2. **A2 (scheduler.py):** vigiar o alvo após um aborto por grace até confirmar
+   `off`/`closed`, ou manter o store como safety net até a confirmação — e testar a
+   atuação tardia (t > grace).
+3. **M1 (scheduler.py):** só logar history quando a atuação foi confirmada; para regas
+   com `duration < ACTUATION_GRACE`, ordenar timers de forma que o actuation check
+   decida antes do stop timer.
+4. **B1 (card.ts):** expor erro do backend ao usuário (estado `_formError`/`_settingsError`
+   em vez de `console.error`) e limitar o input de minutos ao máximo permitido.
+5. **B2/B3/B4:** alinhar `_async_abort_run` à política de preservação do store; tratar
+   `ValueError` de domínio antes do save; `extra=vol.PREVENT_EXTRA` ou corrigir comentário.
 
 ---
 
@@ -185,18 +207,22 @@ não rastreados, pré-existentes).
 
 # Frontend
 cd frontend-src
-npm run typecheck; npm run test; npm run build
+npm run typecheck
+npm run test
+node smoke.mjs
 ```
 
 ---
 
 ## 7. Conclusão
 
-**PRECISA DE ALTERAÇÃO.** O núcleo do scheduler (segurança da válvula: timer imediato,
-grace de atuação, token de geração, retry de turn_off, recovery fail-safe) está sólido e
-bem testado, e o commit do pH gate está bem coberto — **exceto** que o requisito
-fail-safe tem uma fuga real (`nan` abre a válvula, C1) e o mecanismo de recovery tem um
-ponto de falha (A1) que pode deixar a válvula aberta sem defesa após um store corrompido.
-Ambos são reproduzíveis e de baixo custo de correção. Os demais achados (M1-M3 e B1-B10)
-são melhorias de robustez/UX sem risco físico. A correção de C1, A1 e M1 (com testes de
-regressão adversarial) deve anteceder a aprovação; M2/B1 são recomendados na mesma leva.
+**PRECISA DE ALTERAÇÃO.** O núcleo do scheduler está sólido e as falhas críticas
+apontadas na rodada anterior (pH `nan`, recovery com duration corrompida, schedule com
+duration corrompida) foram **corrigidas e cobertas por testes**. Porém esta revisão
+confirmou em runtime três problemas novos: (A1) o options flow apaga silenciosamente o
+gate de pH/EC configurado ao salvar apenas durações; (A2) um alvo que atua após o aborto
+por grace fica ligado indefinidamente, sem timer, store ou listener (violação da
+invariante de segurança da válvula); e (M1) regas que nunca atuaram entram no history
+como concluídas (rega curta + alvo morto, ou stop durante o grace). Recomenda-se corrigir
+A1/A2/M1 com testes de regressão adversarial antes da aprovação; B1-B4 são melhorias de
+UX/robustez de baixo custo.

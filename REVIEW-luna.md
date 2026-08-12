@@ -67,3 +67,71 @@ O pacote/executável `pytest` não está disponível no `PATH`, e `C:\Python314\
 ## Conclusão
 
 Não aprovar por causa do bypass de `NaN` no gate físico e da recuperação de storage sem validação robusta. Corrigir os achados CRÍTICO/ALTO, acrescentar testes adversariais correspondentes e repetir a suíte backend/frontend antes de considerar **APROVADO**.
+# Revisão adversarial — Luna
+
+## Status final
+
+**PRECISA DE ALTERAÇÃO**
+
+Há um risco de segurança operacional: estados `unavailable`/`unknown` são tratados como confirmação de que a válvula está desligada, permitindo apagar o registro de recuperação.
+
+## Arquivos revisados
+
+- `custom_components/irrigation_scheduler/__init__.py`
+- `custom_components/irrigation_scheduler/config_flow.py`
+- `custom_components/irrigation_scheduler/const.py`
+- `custom_components/irrigation_scheduler/next_run.py`
+- `custom_components/irrigation_scheduler/schedules.py`
+- `custom_components/irrigation_scheduler/scheduler.py`
+- `custom_components/irrigation_scheduler/store.py`
+- `custom_components/irrigation_scheduler/switch.py`
+- `custom_components/irrigation_scheduler/sensor.py`
+- `custom_components/irrigation_scheduler/binary_sensor.py`
+- `frontend-src/src/card.ts`
+- `frontend-src/src/editor.ts`
+- `frontend-src/src/types.ts`
+- `frontend-src/src/utils.ts`
+- testes Python em `tests/` e `tests/integration/`
+- testes TypeScript em `frontend-src/tests/`
+
+## Achados por severidade
+
+### Alta — indisponibilidade pode apagar a proteção de recuperação
+
+**Evidência:** `next_run.py:47-48` coloca `unavailable` e `unknown` em `off_states`; `scheduler.py:1412-1421` usa esses estados em `_async_target_is_off()`. Essa confirmação é usada tanto em `scheduler.py:862` (após tentativas de desligar) quanto em `scheduler.py:1269` (recuperação após reinício).
+
+**Cenário:** uma rega está ativa, o dispositivo fica sem comunicação e o alvo passa a `unavailable`. Ao parar a rega, ou ao iniciar o HA com uma rega vencida no store, o código pode considerar o alvo “off”, remover `entries[entry_id]` e deixar de tentar novamente no próximo boot. O dispositivo pode continuar fisicamente aberto, embora o estado não possa ser confirmado.
+
+**Correção sugerida:** separar “estado que não está atuando” para a checagem de actuação de “desligamento confirmado”. Para remover o runtime state, aceitar apenas `off` (switch/light/input_boolean) ou `closed` (valve); `unknown`/`unavailable` devem manter o registro e acionar a recuperação posterior. Cobrir explicitamente stop e recovery com alvo `unavailable`.
+
+### Média — `set_schedules` aceita IDs duplicados
+
+**Evidência:** `__init__.py:359-379` valida cada item e preserva o ID fornecido via `new_schedule`; não há verificação de unicidade. Embora `async_add_schedule` trate colisões em `scheduler.py:592-596`, o caminho de substituição integral não faz o mesmo.
+
+**Cenário:** uma automação chama `set_schedules` com dois objetos `id: "x"`. `async_update_schedule("x", ...)` atualiza apenas o primeiro, enquanto `async_remove_schedule("x")` remove todos os itens com esse ID. Avisos de pH também são indexados pelo ID e ficam semanticamente ambíguos.
+
+**Correção sugerida:** rejeitar IDs repetidos com `ServiceValidationError`, ou gerar IDs novos para itens subsequentes (preferível rejeitar para não alterar silenciosamente a intenção da automação). Adicionar teste end-to-end.
+
+### Baixa — validação do card não confirma que o sensor pertence à integração
+
+**Evidência:** `frontend-src/src/card.ts:50-64` aceita qualquer entidade cujo ID comece com `sensor.`; o texto de erro promete um sensor da integração. O render apenas repete a checagem de domínio em `card.ts:191-200`.
+
+**Cenário:** configurar `sensor.temperature` ou outro sensor externo. O card renderiza sem atributos do contrato, exibe estado vazio e suas ações tentam chamar serviços da integração direcionados a uma entidade que não é um alvo registrado, produzindo erros no console/serviço.
+
+**Correção sugerida:** validar o contrato mínimo (`switch_entity_id`, `binary_sensor_entity_id` e atributos esperados), ou ao menos tornar a mensagem consistente e oferecer erro claro quando o sensor não for da integração. Não confiar apenas no prefixo do domínio.
+
+## Falsos positivos percebidos
+
+- `water_now` desabilitado pelo switch de agendamento não é falha: o código documenta e implementa o override manual.
+- O atraso de verificação de actuação não é uma janela sem watchdog: o timer de desligamento é armado imediatamente após o comando de ligar.
+- `async_update_schedule` preservar o ID existente é comportamento correto; a ambiguidade decorre especificamente de IDs duplicados aceitos por `set_schedules`.
+- A ausência do pacote Home Assistant no ambiente não constitui defeito do componente; impediu somente a execução dos testes de integração.
+
+## Testes executados
+
+- `python -m pytest -q` — **falhou na coleta**: `ModuleNotFoundError: No module named 'homeassistant'` ao importar `tests/integration/conftest.py`.
+- `python -m pytest -q tests --ignore=tests/integration` — **26 passed, 2 skipped**.
+- `npm test -- --run` em `frontend-src` — **87 passed** (3 arquivos).
+- `npm run build` em `frontend-src` — **passou** (Rollup gerou o bundle frontend).
+
+Os achados acima não são cobertos pelos testes executados; o caso de segurança de estado indisponível deve ser adicionado antes da aprovação.
