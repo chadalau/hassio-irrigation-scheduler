@@ -14,6 +14,7 @@ CONF_ENABLED = "enabled"
 CONF_DEFAULT_DURATION = "default_duration"
 CONF_MAX_DURATION = "max_duration"
 CONF_FLOW_RATE_LPH = "flow_rate_lph"
+CONF_NUMBER_OF_POTS = "number_of_pots"
 CONF_SCHEDULES = "schedules"
 
 # Schedule keys.
@@ -27,6 +28,7 @@ DEFAULT_ENABLED = True
 DEFAULT_DEFAULT_DURATION = 600
 DEFAULT_MAX_DURATION = 7200
 DEFAULT_FLOW_RATE_LPH = 0
+DEFAULT_NUMBER_OF_POTS = 0
 MIN_DURATION = 1
 MAX_SCHEDULE_DURATION = 86400
 
@@ -57,6 +59,7 @@ SERVICE_ADD_SCHEDULE = "add_schedule"
 SERVICE_UPDATE_SCHEDULE = "update_schedule"
 SERVICE_REMOVE_SCHEDULE = "remove_schedule"
 SERVICE_SET_SCHEDULES = "set_schedules"
+SERVICE_SET_ZONE_OPTIONS = "set_zone_options"
 
 # Frontend (Onda B1): the card JS is served as a static path and registered as
 # an extra module URL so Lovelace can load it. The card itself (Lit/TS) is

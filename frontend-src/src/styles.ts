@@ -168,6 +168,38 @@ export const cardStyles = css`
     margin-left: 6px;
   }
 
+  .schedule-perpot {
+    font-size: 0.75rem;
+    color: var(--secondary-text-color);
+    font-weight: 400;
+    margin-left: 4px;
+  }
+
+  .settings-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 8px 16px 16px;
+    border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
+    margin-top: 8px;
+  }
+
+  .settings-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  .settings-actions button {
+    padding: 8px 16px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
   .schedule-actions {
     display: flex;
     align-items: center;

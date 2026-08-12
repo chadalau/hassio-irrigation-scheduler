@@ -155,3 +155,28 @@ set_schedules:
       required: true
       selector:
         object:
+
+set_zone_options:
+  name: Set zone options
+  description: Update optional zone settings (flow rate and/or number of pots).
+  target:
+    entity:
+      integration: irrigation_scheduler
+  fields:
+    flow_rate_lph:
+      name: Flow rate
+      description: Watering flow rate in liters per hour.
+      selector:
+        number:
+          min: 0
+          max: 100000
+          unit_of_measurement: L/h
+          mode: box
+    number_of_pots:
+      name: Number of pots
+      description: Number of pots watered by the zone (used for per-pot volume).
+      selector:
+        number:
+          min: 0
+          max: 100000
+          mode: box

@@ -4,6 +4,7 @@ import {
   allDaysLabel,
   dayLabels,
   formatDuration,
+  formatMl,
   formatRemaining,
   formatTime,
   formatVolume,
@@ -14,6 +15,7 @@ import {
   sanitizeSchedules,
   timeToSeconds,
   toServiceTime,
+  waterPerPotMl,
   waterVolume,
 } from "../src/utils";
 
@@ -294,6 +296,31 @@ describe("formatVolume", () => {
 
   it("handles non-finite input", () => {
     expect(formatVolume(Number.NaN)).toBe("0 L");
+  });
+});
+
+describe("waterPerPotMl / formatMl", () => {
+  it("computes ml per pot from flow, duration and pots", () => {
+    // 300 L/h over 60 s = 5 L total across 12 pots -> 416.67 ml/pot.
+    expect(waterPerPotMl(300, 60, 12)).toBeCloseTo(416.67, 1);
+    // 1200 L/h over 30 s = 10 L across 20 pots -> 500 ml.
+    expect(waterPerPotMl(1200, 30, 20)).toBeCloseTo(500);
+  });
+
+  it("returns null when flow or pots is not configured", () => {
+    expect(waterPerPotMl(0, 60, 12)).toBeNull();
+    expect(waterPerPotMl(300, 60, 0)).toBeNull();
+    expect(waterPerPotMl(300, 60, -1)).toBeNull();
+  });
+
+  it("formats ml and switches to liters above 1000 ml", () => {
+    expect(formatMl(417)).toBe("417 ml");
+    expect(formatMl(0.5)).toBe("0.5 ml");
+    expect(formatMl(1500)).toBe("1.5 L");
+  });
+
+  it("handles non-finite input", () => {
+    expect(formatMl(Number.NaN)).toBe("0 ml");
   });
 });
 

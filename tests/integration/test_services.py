@@ -17,10 +17,13 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components.irrigation_scheduler.const import (
     CONF_DEFAULT_DURATION,
     CONF_ENABLED,
+    CONF_FLOW_RATE_LPH,
     CONF_MAX_DURATION,
+    CONF_NUMBER_OF_POTS,
     CONF_SCHEDULES,
     DOMAIN,
     SERVICE_SET_SCHEDULES,
+    SERVICE_SET_ZONE_OPTIONS,
     SERVICE_UPDATE_SCHEDULE,
     SERVICE_WATER_NOW,
 )
@@ -322,3 +325,63 @@ async def test_set_schedules_with_non_dict_item_raises_service_validation_error(
     assert "index 1" in str(excinfo.value)
     # The stored schedules were left untouched by the failed call.
     assert entry.options[CONF_SCHEDULES] == []
+
+
+async def test_set_zone_options_updates_flow_rate_and_pots(hass: HomeAssistant, setup_zone) -> None:
+    """set_zone_options updates flow rate / pots without reloading the entry."""
+    entry = await setup_zone(
+        target_entity_id="switch.zone1",
+        name="Garden",
+        options={
+            CONF_ENABLED: True,
+            CONF_DEFAULT_DURATION: 600,
+            CONF_MAX_DURATION: 7200,
+            CONF_SCHEDULES: [],
+        },
+    )
+    sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
+    assert sensor_eid is not None
+    scheduler_before = scheduler_of(entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_SET_ZONE_OPTIONS,
+        {
+            "entity_id": sensor_eid,
+            CONF_FLOW_RATE_LPH: 300,
+            CONF_NUMBER_OF_POTS: 12,
+        },
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    assert entry.options[CONF_FLOW_RATE_LPH] == 300
+    assert entry.options[CONF_NUMBER_OF_POTS] == 12
+    # The entry was NOT reloaded: the same scheduler instance lives on.
+    assert scheduler_of(entry) is scheduler_before
+
+    # The sensor now exposes the updated values.
+    state = hass.states.get(sensor_eid)
+    assert state is not None
+    assert state.attributes[CONF_FLOW_RATE_LPH] == 300
+    assert state.attributes[CONF_NUMBER_OF_POTS] == 12
+
+
+async def test_set_zone_options_rejects_negative(hass: HomeAssistant, setup_zone) -> None:
+    """set_zone_options rejects negative values."""
+    import voluptuous as vol
+
+    entry = await setup_zone(target_entity_id="switch.zone1", name="Garden")
+    sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
+    assert sensor_eid is not None
+
+    with pytest.raises(vol.error.MultipleInvalid):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_ZONE_OPTIONS,
+            {"entity_id": sensor_eid, CONF_FLOW_RATE_LPH: -5},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
+
+    assert entry.options.get(CONF_FLOW_RATE_LPH, 0) == 0

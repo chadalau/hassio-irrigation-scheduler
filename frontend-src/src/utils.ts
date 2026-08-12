@@ -120,6 +120,34 @@ export function formatVolume(liters: number): string {
   return `${rounded} L`;
 }
 
+/**
+ * Milliliters delivered to each pot for a run, given the flow rate (L/h), the
+ * run duration (s) and the number of pots. Returns ``null`` when the flow rate
+ * or the number of pots is not configured (0 or missing).
+ */
+export function waterPerPotMl(
+  flowLph: number,
+  durationSeconds: number,
+  pots: number,
+): number | null {
+  const total = waterVolume(flowLph, durationSeconds);
+  if (total === null || !Number.isFinite(pots) || pots <= 0) {
+    return null;
+  }
+  return (total * 1000) / pots;
+}
+
+/** "417 ml", "1.2 L" (liters when >= 1000 ml). */
+export function formatMl(ml: number): string {
+  if (!Number.isFinite(ml)) {
+    return "0 ml";
+  }
+  if (ml >= 1000) {
+    return formatVolume(ml / 1000);
+  }
+  return `${Math.round(ml * 100) / 100} ml`;
+}
+
 /** "MM:SS"; "H:MM:SS" once the remaining time exceeds one hour. */
 export function formatRemaining(seconds: number): string {
   const safe = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));

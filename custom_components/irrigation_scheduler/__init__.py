@@ -38,6 +38,8 @@ from .const import (
     CONF_SCHEDULE_ID,
     CONF_SCHEDULE_TIME,
     CONF_SCHEDULES,
+    CONF_FLOW_RATE_LPH,
+    CONF_NUMBER_OF_POTS,
     DOMAIN,
     MAX_SCHEDULE_DURATION,
     MIN_DURATION,
@@ -45,6 +47,7 @@ from .const import (
     SERVICE_ADD_SCHEDULE,
     SERVICE_REMOVE_SCHEDULE,
     SERVICE_SET_SCHEDULES,
+    SERVICE_SET_ZONE_OPTIONS,
     SERVICE_STOP,
     SERVICE_UPDATE_SCHEDULE,
     SERVICE_WATER_NOW,
@@ -109,6 +112,17 @@ UPDATE_SCHEDULE_SCHEMA = vol.Schema(
 
 REMOVE_SCHEDULE_SCHEMA = vol.Schema(
     {vol.Required(CONF_SCHEDULE_ID): cv.string}
+)
+
+SET_ZONE_OPTIONS_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_FLOW_RATE_LPH): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=100000)
+        ),
+        vol.Optional(CONF_NUMBER_OF_POTS): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=100000)
+        ),
+    }
 )
 
 # Keys Home Assistant injects into a targeted service call. They are target
@@ -331,6 +345,15 @@ async def _async_register_services(hass: HomeAssistant) -> None:
             await scheduler.async_set_schedules(schedules)
         return None
 
+    async def _async_set_zone_options(call: ServiceCall) -> ServiceResponse:
+        data = SET_ZONE_OPTIONS_SCHEMA(_service_data(call))
+        for scheduler in await _async_resolve_schedulers(hass, call):
+            await scheduler.async_set_zone_options(
+                flow_rate_lph=data.get(CONF_FLOW_RATE_LPH),
+                number_of_pots=data.get(CONF_NUMBER_OF_POTS),
+            )
+        return None
+
     for service, handler in (
         (SERVICE_WATER_NOW, _async_water_now),
         (SERVICE_STOP, _async_stop),
@@ -338,6 +361,7 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         (SERVICE_UPDATE_SCHEDULE, _async_update_schedule),
         (SERVICE_REMOVE_SCHEDULE, _async_remove_schedule),
         (SERVICE_SET_SCHEDULES, _async_set_schedules),
+        (SERVICE_SET_ZONE_OPTIONS, _async_set_zone_options),
     ):
         hass.services.async_register(DOMAIN, service, handler, schema=None)
 
@@ -351,6 +375,7 @@ def _async_unregister_services(hass: HomeAssistant) -> None:
         SERVICE_UPDATE_SCHEDULE,
         SERVICE_REMOVE_SCHEDULE,
         SERVICE_SET_SCHEDULES,
+        SERVICE_SET_ZONE_OPTIONS,
     ):
         if hass.services.has_service(DOMAIN, service):
             hass.services.async_remove(DOMAIN, service)

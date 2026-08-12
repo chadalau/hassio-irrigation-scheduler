@@ -95,6 +95,7 @@ async def test_sensor_attribute_contract_has_all_keys_and_sibling_ids(
         "default_duration",
         "max_duration",
         "flow_rate_lph",
+        "number_of_pots",
         "switch_entity_id",
         "binary_sensor_entity_id",
     }
@@ -108,6 +109,7 @@ async def test_sensor_attribute_contract_has_all_keys_and_sibling_ids(
     assert state.attributes["default_duration"] == 600
     assert state.attributes["max_duration"] == 7200
     assert state.attributes["flow_rate_lph"] == 0
+    assert state.attributes["number_of_pots"] == 0
     assert state.attributes["schedules"] == []
 
 

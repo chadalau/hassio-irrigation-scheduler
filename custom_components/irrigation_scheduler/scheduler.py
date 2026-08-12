@@ -57,6 +57,7 @@ from .const import (
     CONF_ENABLED,
     CONF_FLOW_RATE_LPH,
     CONF_MAX_DURATION,
+    CONF_NUMBER_OF_POTS,
     CONF_SCHEDULE_DURATION,
     CONF_SCHEDULE_ID,
     CONF_SCHEDULES,
@@ -65,6 +66,7 @@ from .const import (
     DEFAULT_ENABLED,
     DEFAULT_FLOW_RATE_LPH,
     DEFAULT_MAX_DURATION,
+    DEFAULT_NUMBER_OF_POTS,
     DOMAIN,
     MAX_SCHEDULE_DURATION,
     MIN_DURATION,
@@ -242,6 +244,22 @@ class IrrigationScheduler:
         )
         return DEFAULT_FLOW_RATE_LPH
 
+    @property
+    def number_of_pots(self) -> int:
+        """Number of pots/plants watered by the zone (0 = unknown/disabled)."""
+        try:
+            value = self.entry.options.get(CONF_NUMBER_OF_POTS, DEFAULT_NUMBER_OF_POTS)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                return value
+        except (TypeError, ValueError):
+            pass
+        _LOGGER.warning(
+            "Invalid number_of_pots in options for %s; using default %s",
+            self.entry.entry_id,
+            DEFAULT_NUMBER_OF_POTS,
+        )
+        return DEFAULT_NUMBER_OF_POTS
+
     def _duration_option(self, key: str, default: int) -> int:
         """Return a validated duration option (seconds) or ``default``.
 
@@ -314,6 +332,25 @@ class IrrigationScheduler:
         """Replace the full schedule list (stored in entry.options)."""
         options = dict(self.entry.options)
         options[CONF_SCHEDULES] = schedules
+        self.hass.config_entries.async_update_entry(self.entry, options=options)
+
+    async def async_set_zone_options(
+        self,
+        *,
+        flow_rate_lph: int | None = None,
+        number_of_pots: int | None = None,
+    ) -> None:
+        """Update optional zone settings (flow rate / number of pots).
+
+        Only the fields that are not ``None`` are changed; the rest of the
+        options are preserved. The entry is NOT reloaded (the update listener
+        only recalculates the next firing).
+        """
+        options = dict(self.entry.options)
+        if flow_rate_lph is not None:
+            options[CONF_FLOW_RATE_LPH] = flow_rate_lph
+        if number_of_pots is not None:
+            options[CONF_NUMBER_OF_POTS] = number_of_pots
         self.hass.config_entries.async_update_entry(self.entry, options=options)
 
     async def async_add_schedule(self, schedule: dict[str, Any]) -> None:

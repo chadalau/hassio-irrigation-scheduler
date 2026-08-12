@@ -15,6 +15,7 @@ import {
   allDaysLabel,
   dayLabels,
   formatDuration,
+  formatMl,
   formatRemaining,
   formatTime,
   formatVolume,
@@ -24,6 +25,7 @@ import {
   sanitizeSchedules,
   timeToSeconds,
   toServiceTime,
+  waterPerPotMl,
   waterVolume,
 } from "./utils";
 import type {
@@ -70,6 +72,15 @@ export class IrrigationScheduleCard extends LitElement {
 
   @state()
   private _dialogOpen = false;
+
+  @state()
+  private _settingsOpen = false;
+
+  @state()
+  private _settingsFlow = "";
+
+  @state()
+  private _settingsPots = "";
 
   @state()
   private _editingId: string | null = null;
@@ -190,6 +201,7 @@ export class IrrigationScheduleCard extends LitElement {
     const schedules = sanitizeSchedules(sensor.attributes.schedules);
     const defaultDuration = this._numberAttr(sensor, "default_duration") ?? 0;
     const flowRate = this._numberAttr(sensor, "flow_rate_lph") ?? 0;
+    const numberOfPots = this._numberAttr(sensor, "number_of_pots") ?? 0;
     const switchEntity = this._switchEid
       ? this.hass?.states[this._switchEid]
       : undefined;
@@ -218,7 +230,7 @@ export class IrrigationScheduleCard extends LitElement {
     const progress =
       startedAt && finishesAt ? progressPct(finishesAt, startedAt, nowIso) : 0;
 
-    const waterNowLabel = this._waterNowLabel(defaultDuration, flowRate);
+    const waterNowLabel = this._waterNowLabel(defaultDuration, flowRate, numberOfPots);
 
     return html`
       <ha-card class=${compact ? "compact" : ""}>
@@ -237,8 +249,16 @@ export class IrrigationScheduleCard extends LitElement {
                   ></ha-switch>
                 `
               : html`<ha-switch disabled></ha-switch>`}
+            <ha-icon-button
+              title="Configurar vazão e vasos"
+              @click=${this._openSettings}
+            >
+              <ha-icon icon="mdi:cog"></ha-icon>
+            </ha-icon-button>
           </div>
         </div>
+
+        ${this._renderSettings(flowRate, numberOfPots)}
 
         ${wateringOn && finishesAt
           ? html`
@@ -282,7 +302,7 @@ export class IrrigationScheduleCard extends LitElement {
             ${schedules.length === 0
               ? html`<div class="empty">Nenhum horário configurado.</div>`
               : schedules.map((schedule) =>
-                  this._renderScheduleRow(schedule, labels, locale, flowRate),
+                  this._renderScheduleRow(schedule, labels, locale, flowRate, numberOfPots),
                 )}
           </div>
 
@@ -315,8 +335,10 @@ export class IrrigationScheduleCard extends LitElement {
     labels: string[],
     locale: string,
     flowRate: number,
+    numberOfPots: number,
   ): TemplateResult {
     const volume = waterVolume(flowRate, schedule.duration);
+    const perPot = waterPerPotMl(flowRate, schedule.duration, numberOfPots);
     return html`
       <div class="schedule-row">
         <div class="schedule-time">${formatTime(schedule.time)}</div>
@@ -331,6 +353,9 @@ export class IrrigationScheduleCard extends LitElement {
           ${formatDuration(schedule.duration)}
           ${volume !== null
             ? html`<span class="schedule-volume">≈ ${formatVolume(volume)}</span>`
+            : ""}
+          ${volume !== null && perPot !== null
+            ? html`<span class="schedule-perpot">· ${formatMl(perPot)}/vaso</span>`
             : ""}
         </div>
         <ha-switch
@@ -355,13 +380,89 @@ export class IrrigationScheduleCard extends LitElement {
     `;
   }
 
-  private _waterNowLabel(defaultDuration: number, flowRate: number): string {
+  private _waterNowLabel(
+    defaultDuration: number,
+    flowRate: number,
+    numberOfPots: number,
+  ): string {
     if (defaultDuration <= 0) {
       return "Regar agora";
     }
     const label = `Regar agora por ${formatDuration(defaultDuration)}`;
     const volume = waterVolume(flowRate, defaultDuration);
-    return volume !== null ? `${label} (≈ ${formatVolume(volume)})` : label;
+    if (volume === null) {
+      return label;
+    }
+    const perPot = waterPerPotMl(flowRate, defaultDuration, numberOfPots);
+    return perPot !== null
+      ? `${label} (≈ ${formatVolume(volume)} · ${formatMl(perPot)}/vaso)`
+      : `${label} (≈ ${formatVolume(volume)})`;
+  }
+
+  private _renderSettings(flowRate: number, numberOfPots: number): TemplateResult {
+    if (!this._settingsOpen) {
+      return html``;
+    }
+    return html`
+      <div class="settings-panel">
+        <div class="field">
+          <label>Vazão (L/h)</label>
+          <input
+            type="number"
+            min="0"
+            .value=${this._settingsFlow || String(flowRate)}
+            @change=${this._onSettingsFlowChange}
+          />
+        </div>
+        <div class="field">
+          <label>Número de vasos</label>
+          <input
+            type="number"
+            min="0"
+            .value=${this._settingsPots || String(numberOfPots)}
+            @change=${this._onSettingsPotsChange}
+          />
+        </div>
+        <div class="settings-actions">
+          <button class="dialog-cancel" @click=${this._closeSettings}>
+            Fechar
+          </button>
+          <button class="dialog-save" @click=${this._saveSettings}>Salvar</button>
+        </div>
+      </div>
+    `;
+  }
+
+  private _openSettings(): void {
+    this._settingsOpen = !this._settingsOpen;
+  }
+
+  private _closeSettings(): void {
+    this._settingsOpen = false;
+    this._settingsFlow = "";
+    this._settingsPots = "";
+  }
+
+  private _onSettingsFlowChange(ev: Event): void {
+    this._settingsFlow = (ev.target as HTMLInputElement).value;
+  }
+
+  private _onSettingsPotsChange(ev: Event): void {
+    this._settingsPots = (ev.target as HTMLInputElement).value;
+  }
+
+  private _saveSettings(): void {
+    const flow = Number.parseInt(this._settingsFlow, 10);
+    const pots = Number.parseInt(this._settingsPots, 10);
+    const data: Record<string, unknown> = {};
+    if (Number.isFinite(flow) && flow >= 0) {
+      data.flow_rate_lph = flow;
+    }
+    if (Number.isFinite(pots) && pots >= 0) {
+      data.number_of_pots = pots;
+    }
+    this._callService("set_zone_options", data);
+    this._closeSettings();
   }
 
   private _renderDialog(labels: string[]): TemplateResult {
