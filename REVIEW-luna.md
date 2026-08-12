@@ -1,55 +1,102 @@
-# Revisão adversarial independente — Luna
-
-## Escopo e working tree
-
-Revisado o estado atual do working tree, sem consultar os demais arquivos `REVIEW-*.md` e sem comparar com outros reviewers. O tree já estava amplamente alterado e contém, entre outros novos arquivos, `tests/integration/test_history.py`, `tests/integration/test_ph_gate_r2.py`, `tests/integration/test_review_fixes.py` e `frontend-src/tests/editor.test.ts`. Também há alterações não commitadas no backend, bundle frontend, fontes, testes, documentação e metadados.
-
-Não foram feitas alterações deliberadas em código de produção ou testes. O comando de build solicitado reescreveu o artefato bundle em `custom_components/irrigation_scheduler/frontend/irrigation-schedule-card.js`; ele já fazia parte das alterações do working tree e não foi editado manualmente.
+# Revisão adversarial — rodada pós-correções
 
 ## Arquivos revisados
 
-- Backend: `custom_components/irrigation_scheduler/__init__.py`, `binary_sensor.py`, `config_flow.py`, `const.py`, `next_run.py`, `scheduler.py`, `schedules.py`, `sensor.py`, `store.py`, `switch.py`, `services.yaml`, `manifest.json`.
-- Frontend fonte: `frontend-src/src/card.ts`, `editor.ts`, `styles.ts`, `types.ts`, `utils.ts`, `const.ts`; bundle `custom_components/irrigation_scheduler/frontend/irrigation-schedule-card.js`.
-- Testes: `tests/test_schedules.py`, `tests/test_next_run.py`, `tests/integration/conftest.py`, todos os testes em `tests/integration/`, incluindo os novos acima; `frontend-src/tests/card.test.ts`, `utils.test.ts`, `editor.test.ts`.
-- Contratos/documentação/configuração: `README.md`, `FUNCTIONS.md`, `hacs.json`, `pytest.ini`, `requirements-test.txt`, `frontend-src/package.json`, `frontend-src/package-lock.json`, `frontend-src/tsconfig.json`, `frontend-src/vitest.config.ts`, `frontend-src/rollup.config.mjs`, `strings.json` e traduções.
+- `custom_components/irrigation_scheduler/scheduler.py`
+- `custom_components/irrigation_scheduler/store.py`
+- `custom_components/irrigation_scheduler/binary_sensor.py`
+- `custom_components/irrigation_scheduler/sensor.py`
+- `custom_components/irrigation_scheduler/const.py`
+- `custom_components/irrigation_scheduler/__init__.py`
+- `custom_components/irrigation_scheduler/frontend/irrigation-schedule-card.js`
+- `frontend-src/tests/editor.test.ts`
+- Testes de backend em `tests/` e `tests/integration/` (sem alteração)
 
 ## Achados
 
-### Alta — histórico perde as leituras capturadas quando a execução atravessa um restart
+### ALTA — `started_at` naive ainda pode quebrar recovery e histórico
 
-- **Arquivo:linha:** `custom_components/irrigation_scheduler/scheduler.py:1474-1482`.
-- **Cenário/evidência:** `_async_start_run` persiste `ph_value`, `ec_value`, unidades e os valores R2 no runtime store (`:793-807`). Porém, ao recuperar uma execução ainda ativa, `_async_recover_state` restaura apenas `started_at`, `finishes_at`, duração, source e schedule id; não restaura nenhum dos seis campos de leitura para `_active_*`. Quando o timer termina depois do restart, `_async_finish_run` captura esses atributos já nulos (`:918-923`) e grava um histórico sem as leituras que existiam no início da rega. Isso contradiz o contrato documentado de snapshot no início e torna o histórico dependente de restart.
-- **Sugestão:** restaurar todos os snapshots persistidos durante a recuperação, validando tipos/unidades como dados informativos, e cobrir explicitamente “restart durante execução -> finish -> histórico”.
+**Status do achado anterior: não corrigido integralmente.**
 
-### Média — execução desligada externamente não é registrada no histórico
+Em `scheduler.py:1458-1469`, somente `finishes_at` é normalizado com
+`dt_util.as_utc()`. Em `:1532-1541`, um `started_at` parseável mas naive é
+atribuído diretamente a `_started_at`. Depois, ao finalizar, `_async_log_history`
+faz `finished_at - started_at` (`:1109`), misturando datetime aware e naive e
+levantando `TypeError`. O mesmo risco existe no caminho de recovery expirado,
+quando `recovered_started_at` naive é passado ao logger (`:1496-1505`).
 
-- **Arquivo:linha:** `custom_components/irrigation_scheduler/scheduler.py:1344-1353` e `:924-930,1016-1028`.
-- **Cenário/evidência:** ao receber uma mudança externa para `off`/`closed`, o listener chama `_async_finish_run(turn_off=False)`. Antes de desligar o estado, `_async_finish_run` define `history_actuated = self._async_target_is_actuated()`. Como o alvo já está off no evento, o valor é falso e a condição `log_history and history_actuated` impede o append. Assim, uma válvula que regou por 10 minutos e depois foi desligada por automação, dispositivo ou usuário desaparece do histórico; o histórico não representa todas as regas concluídas.
-- **Sugestão:** distinguir “nunca atuou” (somente falha na janela de actuation) de “atuou e depois desligou externamente”; no caminho do listener, preservar a evidência de que a execução estava ativa e registrar a duração real, sem enfraquecer a proteção contra logar uma tentativa que nunca atuou.
+Cenários afetados: store editado/legado com `started_at` sem timezone, tanto
+com run ainda futuro quanto expirado durante downtime. O teste existente
+`test_prune_history_normalizes_naive_started_at_instead_of_raising` cobre apenas
+`_prune_history`, não esses caminhos de recovery.
 
-### Baixa — datas do histórico são agrupadas no fuso do navegador, enquanto o próximo disparo usa o fuso do servidor
+**Sugestão:** normalizar `started_at` com `dt_util.as_utc()` após o parse, antes
+de armazená-lo/usar em `_coerce_stored_duration` e no logging; tratar valor
+inválido de modo consistente sem permitir exceção na inicialização.
 
-- **Arquivo:linha:** `frontend-src/src/utils.ts:320-367` e `frontend-src/src/card.ts:1006-1011,1314-1332`.
-- **Cenário/evidência:** `_nextRunText` usa `hass.config.time_zone`, mas `dayLabelFor`, `groupHistoryByDay` e os horários de histórico usam implicitamente o fuso local do browser (`Date.toDateString()`/`Intl` sem `timeZone`). Um usuário em outro fuso pode ver uma execução agrupada no dia errado e uma hora diferente da hora operacional do HA.
-- **Sugestão:** escolher e aplicar consistentemente o fuso do servidor ao agrupar e formatar o histórico, ou documentar explicitamente que o histórico é local do visualizador e testar essa decisão em browsers com fusos distintos.
+### MÉDIA — o atributo de estado `history` continua potencialmente grande
+
+Em `binary_sensor.py:56-66`, `extra_state_attributes` ainda publica a lista
+completa em `"history"`. O limite de `HISTORY_MAX_ENTRIES = 200` e a poda em
+`store.py:41-64` evitam crescimento ilimitado, mas 200 objetos (com timestamps,
+snapshots e metadados) continuam sendo serializados em cada state update,
+duplicados no histórico/recorder e enviados a consumidores do estado. Isso não
+elimina o problema original de payload grande; apenas o torna limitado.
+
+O frontend usa essa lista em `irrigation-schedule-card.js` (`_historyAttr`),
+portanto a mudança precisa preservar a UX (por exemplo, expor somente uma
+janela pequena no atributo ou migrar a consulta detalhada para outro mecanismo).
+O teste `test_history_caps_at_max_entries` comprova o teto de 200, mas não
+mede tamanho do atributo nem custo de publicação.
+
+## Verificação dos seis pontos solicitados
+
+- **Parada externa sumindo do histórico:** corrigido. O listener marca
+  `_active_actuated` quando observa o alvo ligado (`scheduler.py:1380-1389`),
+  e `_async_finish_run` usa esse marcador antes de limpar o estado
+  (`:969-979`, `:1066-1078`). O teste `test_external_stop_after_real_watering_is_logged_to_history`
+  passou.
+- **Zona presa em “Regando” após falha de I/O no store:** corrigido para falha
+  em `async_save_entry`. O estado é revertido integralmente em
+  `scheduler.py:811-853`, antes de qualquer `turn_on`; o teste
+  `test_start_run_reverts_state_when_store_save_fails` passou.
+- **Snapshot pH/EC perdido no resume:** corrigido. Os campos são persistidos
+  no início (`:812-825`) e restaurados no recovery (`:1547-1556`); o teste
+  `test_resumed_run_that_finishes_normally_logs_restored_ph_ec` passou.
+- **Atributo `history` grande:** apenas parcialmente mitigado. Há retenção de
+  30 dias e teto de 200, mas a lista inteira ainda é atributo do binary sensor.
+- **Recovery removendo store sem confirmação de off:** corrigido. O caminho
+  expirado só remove após `_async_target_is_off()` (`:1487-1493`), e falha,
+  `unknown` ou `unavailable` preserva o registro (`:1515-1522`). Os testes de
+  falha de turn-off e de alvo indisponível passaram.
+- **`started_at` naive:** corrigido somente na poda de histórico
+  (`store.py:51-60`); permanece vulnerável no recovery, conforme achado ALTA.
 
 ## Falsos positivos percebidos
 
-- O `async_track_point_in_time` antes do stop timer e o `ACTUATION_GRACE` não constituem, por si só, uma janela sem watchdog: o timer é armado logo após o comando de ligar (`scheduler.py:840-867`).
-- O uso de `turn_off=False` no listener não é uma falha de segurança por si só: o listener só entra quando o estado atual já é off/closed; o problema apontado é a perda de histórico.
-- `next_run.py` usa oito dias de busca (`range(8)`), o que cobre o dia atual e o próximo ciclo semanal; não encontrei erro de wrap semanal nesse ponto.
-- A ausência de leituras durante recuperação após uma execução que terminou durante o downtime não é o mesmo defeito: esse caminho usa diretamente os valores persistidos (`scheduler.py:1438-1449`).
+- A ausência de uma segunda tentativa de actuation-grace no resume não é, por
+  si só, falha: o código verifica o estado imediatamente e mantém o timer de
+  parada.
+- A remoção do store após `turn_off` não é insegura quando o estado atual é
+  explicitamente `off`/`closed`; `unknown`/`unavailable` são corretamente
+  tratados como não confirmados.
+- O teste de cap de histórico não demonstra que o atributo é pequeno; ele
+  demonstra apenas que não cresce sem limite. Não foi contado como correção
+  completa do payload grande.
 
-## Testes executados
+## Testes e comandos executados
 
-- `python -m pytest tests/test_schedules.py tests/test_next_run.py -q` — **26 passed, 2 skipped**.
-- `& "$env:TEMP\opencode\ha-venv\Scripts\python.exe" -m pytest tests/integration -q` — **93 passed**.
-- `npm run typecheck` em `frontend-src` — **passou**.
-- `npm run test` em `frontend-src` — **3 arquivos, 107 testes passed**.
-- `npm run build` em `frontend-src` — **passou**, gerando o bundle no diretório da integração.
+- `python -m pytest tests --ignore=tests/integration` — **26 passed, 2 skipped**
+- `& "$env:TEMP\opencode\ha-venv\Scripts\python.exe" -m pytest tests/integration` — **99 passed**
+- `npm run typecheck` — **passou**
+- `npm run test` — **110 passed (3 arquivos)**
+- `npm run build` — **passou**
 
 ## Status final
 
 # PRECISA DE ALTERAÇÃO
 
-Há perda de dados funcional no histórico após restart e ao desligar externamente, além da inconsistência de fuso no frontend. Os testes existentes passam, mas não cobrem adequadamente esses cenários adversariais.
+Corrigir a normalização de `started_at` em todos os caminhos de recovery antes
+de aprovar. Também é recomendável reduzir/remover a lista completa do atributo
+de estado; o limite atual evita crescimento infinito, mas não resolve
+integralmente o achado de payload grande.

@@ -1,129 +1,93 @@
-# REVIEW-deepseek-pro.md — Revisão adversarial independente (deepseek-v4-pro)
+# REVIEW-deepseek-pro.md — Reverificação (deepseek-v4-pro)
 
-**Revisor:** deepseek-v4-pro (DeepSeek API) · **Status: PRECISA DE ALTERAÇÃO**
+**Revisor:** deepseek-v4-pro (DeepSeek API) · **Status: PRECISA DE ALTERAÇÃO (1 item incompleto + 1 achado novo)**
 
-Revisão independente do estado atual de `watergaia`. Não alterei código de
-produção nem testes. Os números abaixo foram executados por mim.
+Reverificação do estado atual de `watergaia` após a rodada de correções. Não
+alterei código de produção nem testes. Números executados por mim.
 
 ## Testes executados
 
-| Suite | Comando | Resultado |
+| Suite | Resultado |
+|---|---|
+| Backend completo (HA 2026.2.3 + PHCC) | **127 passed** |
+| Backend puro | **28 passed** |
+| Frontend typecheck / vitest | **0 erros** / **110 passed** |
+| `compileall custom_components` | **0 erros** |
+
+## Verificação dos achados anteriores
+
+| # | Achado | Veredito |
 |---|---|---|
-| Backend completo (HA 2026.2.3 + PHCC) | `pytest tests -q` | **121 passed** |
-| Backend puro | `pytest tests/test_next_run.py tests/test_schedules.py -q` | **28 passed** |
-| Frontend | `npm run typecheck` / `npm run test` | **0 erros** / **107 passed** |
-| Sintaxe | `py -m compileall -q custom_components` | **0 erros** |
+| 1 | Parada externa some do histórico | ✅ **CORRIGIDO** — flag `_active_actuated` (linhas 180/809/991/1154/1194/1388/1587) + `history_actuated = self._active_actuated or self._async_target_is_actuated()` (979) |
+| 2 | Zona presa em "Regando" em falha de I/O no store | ✅ **CORRIGIDO** — `try/except` em `async_save_entry` com revert do estado (811-853) |
+| 3 | Snapshot pH/EC não restaurado no resume | ✅ **CORRIGIDO** — restauração explícita (1551-1556) |
+| 4 | Atributo `history` grande | ✅ **CORRIGIDO** — `_prune_history` com cap de idade/entradas em load e append |
+| 5 | Recovery removendo store sem confirmação | ✅ **CORRIGIDO** — `turn_off=True` no resume (1583) + `confirmed_off_states` |
+| 6 | `started_at` naive em store corrompido | ⚠️ **INCOMPLETO** — ver abaixo |
 
-## Achados (análise própria, confirmada lendo o código)
+## Achado 6 incompleto — `started_at` naive ainda pode quebrar o setup
 
-### MÉDIO — Parada externa do alvo não é registrada no histórico
+**Arquivo:** `scheduler.py`.
 
-**Arquivo:** `scheduler.py`, `_async_target_state_changed` (1317) e
-`_async_finish_run` (930).
+`finishes_at` foi normalizado com `dt_util.as_utc(finishes_at)` (1469), mas
+`started_at` **não**. Dois caminhos ainda podem lançar `TypeError` com um store
+contendo `started_at` naive:
 
-Quando o alvo é desligado externamente (fora do card/automação), o listener
-chama `_async_finish_run(turn_off=False, ...)`. Dentro dele,
-`history_actuated = self._async_target_is_actuated()` é avaliado no instante do
-fim — mas nesse caminho o alvo **já está desligado**, então
-`history_actuated=False` e o registro NÃO é gravado.
+1. **Downtime (fim durante parada):** `recovered_started_at` (1496-1498) é
+   passado direto para `_async_log_history`, cujo cálculo
+   `duration = max(0, int((finished_at - started_at).total_seconds()))` (1109)
+   fica **fora** do `try/except` (que só envolve `async_append_history`, 1125).
+   `aware - naive` → `TypeError` propagando até `async_setup` → "Error setting
+   up entry".
 
-O resultado é que uma rega que **realmente entregou água** (ligou, regou por um
-tempo e foi desligada externamente) some do histórico. O check atual não
-consegue distinguir "nunca atuou" de "atuou e depois foi desligado
-externamente". É um falso-negativo da feature de histórico.
+2. **Resume:** `_coerce_stored_duration` (1614) faz
+   `finishes_at - fallback_start`; se `fallback_start` for o `started_at` naive
+   (com `duration` inválido no store), também levanta `TypeError`.
 
-**Sugestão:** rastrear "atuou em algum momento" como flag de estado (setada
-assim que o alvo sai de off, ou capturada do próprio run), em vez de avaliar o
-estado apenas no fim.
+É robustez defensiva (só ocorre com store adulterado), mas é exatamente o que o
+achado 6 pedia; a correção tratou só `finishes_at`.
 
-### MÉDIO — Falha de I/O no `async_save_entry` deixa a zona presa em "Regando"
+**Sugestão:** normalizar `started_at` com `dt_util.as_utc` logo após o parse
+(nos dois caminhos), ou envolver o cálculo de `duration` de `_async_log_history`
+em `try/except`.
 
-**Arquivo:** `scheduler.py`, `_async_start_run` (793).
+## Achado novo — evento externo `unavailable`/`unknown` remove store sem confirmação
 
-`await self.store.async_save_entry(...)` ocorre após `self._is_watering = True`
-(780) e **antes** de armar o timer de parada (865) e do `turn_on` (812). Se a
-gravação lançar exceção (disco/Store), a exceção propaga para fora de
-`_async_start_run` sem `try/except`. O estado em memória fica `_is_watering=True`
-sem timer e sem nunca ligar o alvo.
+**Arquivo:** `scheduler.py`, `_async_target_state_changed` (1369-1414).
 
-Consequência: o alvo permanece **desligado** (não há risco físico), mas a zona
-fica presa exibindo "Regando", e o próximo disparo agendado é pulado (vê
-`_is_watering=True`). A exceção aparece como "Task exception was never
-retrieved" no callback do timer.
+O listener decide por `current.state not in off_states(...)` (1381), e
+`off_states` inclui `unavailable`/`unknown`. Quando o alvo vira `unavailable`
+(ou `unknown`) durante a rega, o código cai no caminho de "parada externa" e
+chama `_async_finish_run(turn_off=False, remove_state=True)` (1412-1414):
 
-**Sugestão:** envolver a gravação em `try/except` e reverter o estado
-(`_is_watering=False` etc.) em caso de falha, ou gravar o estado do run de
-forma não-bloqueante/recuperável, sem deixar a zona em estado incoerente.
+- `turn_off=False` → **nenhum** desligamento é tentado.
+- `remove_state=True` → o store é **removido sem confirmação** de off.
 
-### BAIXO — Run retomado após restart não restaura snapshot de pH/EC
+Um `unavailable` é, por definição, "parou de reportar", não "fechou". Se a
+válvula física continuar aberta e voltar a reportar depois, não sobra timer nem
+registro de recovery. Isso contraria a política `confirmed_off_states` recém
+aplicada aos demais caminhos (abort/finish/grace), que preservam o store quando
+o off não é confirmado.
 
-**Arquivo:** `scheduler.py`, `_async_recover_state` (1474-1482).
+**Sugestão:** no listener, quando o estado atual for `unavailable`/`unknown`
+(não confirmado off), não remover o store e tentar desligamento defensivo —
+consistente com `_async_abort_run`/`_async_finish_run`.
 
-No resume (finishes_at futuro), o código restaura `source`, `schedule_id` e
-`duration`, mas **não** restaura `_active_ph_value`/`_active_ec_value`/unidade
-(e contrapartes R2) que estão gravadas no store. Quando essa rega termina, o
-`_async_finish_run` captura esses campos como `None` e o histórico grava `null`,
-mesmo tendo os valores persistidos.
+## Falsos positivos / itens confirmados
 
-**Sugestão:** restaurar também `ph_value`/`ec_value`/`ec_unit` (e R2) do
-`run_state` no caminho de resume.
-
-### BAIXO — Atributo de estado `history` pode ficar grande
-
-**Arquivo:** `binary_sensor.py`, `extra_state_attributes` (65).
-
-`history` é exposto integralmente como atributo de estado (até
-`HISTORY_MAX_ENTRIES` registros). Com o limite alto, são dezenas de KB
-serializados e escritos no state machine a cada `async_write_ha_state()`. Não
-é bug de correção, mas escala mal e polui o estado.
-
-**Sugestão:** limitar o atributo exposto (ex.: últimos N=5) e expor o histórico
-completo por serviço, ou reduzir o limite default.
-
-### BAIXO — Recovery de run não-atuado remove store sem confirmação de off
-
-**Arquivo:** `scheduler.py`, `_async_recover_state` (1511-1513).
-
-O caminho "resumido mas não atuado" chama
-`_async_finish_run(turn_off=False, remove_state=True, log_history=False)`.
-Se o alvo estiver `unavailable` (o `turn_off` defensivo falha), o store é
-removido mesmo sem confirmação de `off`. É coerente com o alvo já estar off,
-mas difere do rigor de `_async_abort_run`, que preserva o store quando o off
-não é confirmado.
-
-**Sugestão:** usar a mesma política de confirmação de off antes de remover o
-registro, por consistência.
-
-### BAIXO — `_prune_history`/recovery assumem `started_at` aware
-
-**Arquivo:** `store.py` (52) e `scheduler.py` (1432-1444).
-
-`started_at < cutoff` compara um datetime parseado com `dt_util.utcnow()`. Se o
-store for corrompido com um `started_at` naive (sem timezone), a comparação
-levanta `TypeError`. Só ocorre com store adulterado; baixo impacto, mas
-desejável normalizar/assumir UTC.
-
-## Falsos positivos / pontos verificados como corretos
-
-- **`nan` no gate de pH:** corrigido com `math.isfinite` (1267); `nan`/`inf`
-  agora bloqueiam corretamente. ✓
-- **`_async_schedule_fired` com `try/finally`:** `_reschedule_next()` sempre
-  executa, fechando a lacuna que matava a cadeia de agendamento. ✓
-- **Recovery com `duration` corrompida:** `_coerce_stored_duration` +
-  timer de parada armado contra `finishes_at` (não `duration`); setup não
-  derruba mais. ✓
-- **Inversão parcial da faixa de pH:** validação considera R1/R2 com
-  `_check_ph_range` por reservatório; não reproduzi a inversão parcial relatada
-  anteriormente. ✓
-- **Timer de parada armado imediatamente + grace de atuação + token `_run_id` +
-  retry de turn_off + preservação do store:** núcleo de segurança sólido. ✓
-- **`_async_abort_run` preserva store sem confirmação de off:** correto. ✓
+- `nan` no gate de pH com `math.isfinite` — correto.
+- `_async_schedule_fired` com `try/finally` — `_reschedule_next` sempre executa.
+- Núcleo de segurança (timer imediato, grace, `_run_id`, retry, `confirmed_off_states`) — correto.
+- Restauração de pH/EC, `_active_actuated` para histórico de parada externa, e
+  cap/prune do histórico — corretos e testados.
 
 ## Conclusão
 
-O núcleo de segurança da válvula e as correções das rodadas anteriores estão
-corretos. Restam o falso-negativo do histórico em parada externa (MÉDIO), o
-estado preso em falha de I/O do store (MÉDIO) e quatro itens baixos de
-robustez/escopo. Nenhum deles representa risco físico, mas os dois médios
-comprometem a feature central desta rodada (histórico) e a consistência de
-estado. **PRECISA DE ALTERAÇÃO.**
+5 dos 6 achados foram integralmente corrigidos. O item 6 (`started_at` naive)
+está corrigido pela metade e ainda pode derrubar o setup em store adulterado
+(downtime) ou no resume. Além disso, o listener de estado trata
+`unavailable`/`unknown` como off confirmado, removendo o store sem desligamento
+defensivo — uma inconsistência com a política nova. Nenhum é risco imediato em
+uso normal, mas ambos ferem o rigor defensivo do restante do código.
+
+**PRECISA DE ALTERAÇÃO.**
