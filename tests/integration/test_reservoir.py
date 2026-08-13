@@ -85,6 +85,20 @@ async def test_completed_run_deducts_actual_volume_delivered(
     assert scheduler.reservoir_remaining_l == 100.0 - expected_liters
 
 
+async def test_same_run_uid_is_never_deducted_twice(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    entry = await _setup_zone_with_reservoir(hass, setup_zone)
+    scheduler = scheduler_of(entry)
+
+    scheduler._deduct_reservoir_volume(2.5, "stable-run-id")
+    await hass.async_block_till_done()
+    scheduler._deduct_reservoir_volume(2.5, "stable-run-id")
+    await hass.async_block_till_done()
+
+    assert scheduler.reservoir_remaining_l == 97.5
+
+
 async def test_unconfigured_number_of_pots_deducts_as_one_pot(
     hass: HomeAssistant, setup_zone, mock_homeassistant_services
 ) -> None:

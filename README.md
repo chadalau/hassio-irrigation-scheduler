@@ -7,7 +7,7 @@ and turns it off automatically. Scheduling runs in the backend, so it does not
 depend on a browser or dashboard being open.
 
 - **Backend:** a full Python integration (`custom_components/irrigation_scheduler`)
-  with a config flow, three entities per zone, six services and restart-safe
+  with a config flow, three entities per zone, eight services and restart-safe
   run recovery.
 - **Card:** `irrigation-schedule-card` (Lit/TypeScript, self-contained build).
   The integration registers it automatically — **no manual Resources entry**.
@@ -23,7 +23,7 @@ depend on a browser or dashboard being open.
 ### Via HACS
 
 1. HACS -> three-dot menu -> **Custom repositories** -> add this repo
-   (`https://github.com/jvito/hassio-irrigation-scheduler`) with category
+   (`https://github.com/chadalau/hassio-irrigation-scheduler`) with category
    **Integration**.
 2. Install **Irrigation Scheduler** and restart Home Assistant.
 3. **Settings -> Devices & Services -> Add Integration -> Irrigation Scheduler**.
@@ -65,16 +65,27 @@ The card shows:
   schedule is enabled) and a **Refil** button that resets the counter to
   full;
 - a live countdown bar while watering (computed client-side from
-  `finishes_at`, no backend polling) with a **Parar** button;
+  `finishes_at`, no backend polling) with a **Parar** button; if the target
+  was turned on OUTSIDE the integration (a physical button, the device's own
+  app, another automation) the bar reads "Regando · ativada no dispositivo"
+  — the zone tracks it exactly like a manual run (its `default_duration` is
+  the safety-net stop time) and logs it to history the same way;
 - the next scheduled run, and (separated by a divider) the last completed
   run — clickable to open a history dialog listing every run from the last
-  30 days, grouped by day with per-day totals, each showing its duration,
-  volume per pot, and the pH/EC reading at the time it started;
+  30 days, grouped by day with per-day totals, each showing its source
+  (scheduled/manual/activated on the device), duration, volume per pot, and
+  the pH/EC reading at the time it started;
 - the list of schedules, one line each: time, a fixed 7-letter day indicator
   (highlighted for the selected days), duration, total volume, volume per
-  pot, per-schedule enable/disable/edit/delete, and a `!` warning badge on
-  any schedule whose last SCHEDULED firing was skipped by the pH gate (hover
-  for the reason);
+  pot, per-schedule enable/disable/edit/delete, and a status icon for
+  today's occurrence — a `!` warning whenever the last SCHEDULED firing
+  didn't complete normally (skipped by the pH gate, the target never turned
+  on within the actuation grace window, or the target confirmed off before
+  the scheduled duration finished, e.g. a power/connectivity loss — hover
+  for the specific reason), a green checkmark once today's run is confirmed
+  in the history, or a clock while today's occurrence is still ahead; no
+  icon when today isn't one of the schedule's days or the outcome is not
+  yet known;
 - an **Adicionar horário** dialog (time, days, duration);
 - a **Regar agora** button (uses the zone's default duration);
 - a settings panel (gear icon) to edit the default watering duration, flow

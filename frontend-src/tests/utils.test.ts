@@ -22,7 +22,10 @@ import {
   progressPct,
   remainingSeconds,
   sanitizeSchedules,
+  scheduleStatusToday,
   sortSchedulesByTime,
+  sourceIcon,
+  sourceLabel,
   timeToSeconds,
   toServiceTime,
   totalVolumeMl,
@@ -189,6 +192,123 @@ describe("groupHistoryByDay", () => {
   });
 });
 
+describe("scheduleStatusToday", () => {
+  // 2024-05-06 is a Monday (index 0 in this card's day convention).
+  function schedule(overrides: Partial<Schedule> = {}): Schedule {
+    return {
+      id: "s1",
+      time: "06:00:00",
+      days: [0],
+      duration: 600,
+      enabled: true,
+      ...overrides,
+    };
+  }
+
+  function run(startedAt: string, scheduleId = "s1"): HistoryRun {
+    return {
+      started_at: startedAt,
+      finishes_at: startedAt,
+      duration: 600,
+      source: "schedule",
+      schedule_id: scheduleId,
+      flow_rate_lph: 8,
+      number_of_pots: 1,
+      ph_value: null,
+      ec_value: null,
+      ec_unit: null,
+      ph_value_2: null,
+      ec_value_2: null,
+      ec_unit_2: null,
+    };
+  }
+
+  it("'warning' takes priority over everything else", () => {
+    expect(scheduleStatusToday(schedule(), true, [], "2024-05-06T05:00:00Z", "UTC")).toBe(
+      "warning",
+    );
+  });
+
+  it("returns null for a disabled schedule", () => {
+    expect(
+      scheduleStatusToday(schedule({ enabled: false }), false, [], "2024-05-06T05:00:00Z", "UTC"),
+    ).toBeNull();
+  });
+
+  it("returns null when today is not one of the schedule's days", () => {
+    // Tuesday.
+    expect(
+      scheduleStatusToday(schedule({ days: [0] }), false, [], "2024-05-07T05:00:00Z", "UTC"),
+    ).toBeNull();
+  });
+
+  it("returns 'pending' when today is active and the time has not arrived yet", () => {
+    expect(
+      scheduleStatusToday(schedule(), false, [], "2024-05-06T05:00:00Z", "UTC"),
+    ).toBe("pending");
+  });
+
+  it("returns 'done' when the time passed and history confirms it ran today", () => {
+    const history = [run("2024-05-06T06:00:05Z")];
+    expect(
+      scheduleStatusToday(schedule(), false, history, "2024-05-06T07:00:00Z", "UTC"),
+    ).toBe("done");
+  });
+
+  it("returns null when the time passed with no matching history entry", () => {
+    expect(
+      scheduleStatusToday(schedule(), false, [], "2024-05-06T07:00:00Z", "UTC"),
+    ).toBeNull();
+  });
+
+  it("ignores a history entry for a DIFFERENT schedule_id", () => {
+    const history = [run("2024-05-06T06:00:05Z", "other-schedule")];
+    expect(
+      scheduleStatusToday(schedule(), false, history, "2024-05-06T07:00:00Z", "UTC"),
+    ).toBeNull();
+  });
+
+  it("ignores a history entry from a DIFFERENT calendar day", () => {
+    const history = [run("2024-05-05T06:00:05Z")];
+    expect(
+      scheduleStatusToday(schedule(), false, history, "2024-05-06T07:00:00Z", "UTC"),
+    ).toBeNull();
+  });
+
+  it("ignores an unparseable history date instead of throwing", () => {
+    const history = [run("not-a-date")];
+    expect(
+      scheduleStatusToday(schedule(), false, history, "2024-05-06T07:00:00Z", "UTC"),
+    ).toBeNull();
+  });
+
+  it("evaluates day-of-week and time-of-day in the SERVER timezone, not raw UTC", () => {
+    // 2024-05-06T23:30:00Z is already Tuesday 13:30 in Pacific/Kiritimati
+    // (UTC+14) -- a Monday-only schedule must not be pending/done there.
+    expect(
+      scheduleStatusToday(
+        schedule({ days: [0] }),
+        false,
+        [],
+        "2024-05-06T23:30:00Z",
+        "Pacific/Kiritimati",
+      ),
+    ).toBeNull();
+    // But it IS Tuesday there, so a Tuesday schedule at 13:00 local (already
+    // passed the 13:30 "now") with a matching history entry is done.
+    const history = [run("2024-05-06T23:05:00Z")];
+    expect(
+      scheduleStatusToday(
+        schedule({ days: [1], time: "13:00:00" }),
+        false,
+        history,
+        "2024-05-06T23:30:00Z",
+        "Pacific/Kiritimati",
+      ),
+    ).toBe("done");
+  });
+});
+
 describe("formatSensorReading", () => {
   it("rounds to 2 decimals and appends the unit when given", () => {
     expect(formatSensorReading(6.234)).toBe("6.23");
@@ -199,6 +319,26 @@ describe("formatSensorReading", () => {
   it("renders non-finite/missing values as '?' instead of NaN/blank", () => {
     expect(formatSensorReading(Number.NaN)).toBe("?");
     expect(formatSensorReading(Number.POSITIVE_INFINITY)).toBe("?");
+  });
+});
+
+describe("sourceLabel / sourceIcon", () => {
+  it("labels the three known sources", () => {
+    expect(sourceLabel("schedule")).toBe("agendada");
+    expect(sourceLabel("manual")).toBe("manual");
+    expect(sourceLabel("external")).toBe("ativada no dispositivo");
+  });
+
+  it("falls back to 'agendada' for unknown/missing values", () => {
+    expect(sourceLabel(null)).toBe("agendada");
+    expect(sourceLabel(undefined)).toBe("agendada");
+    expect(sourceLabel("something-else")).toBe("agendada");
+  });
+
+  it("picks a distinct icon per source", () => {
+    expect(sourceIcon("schedule")).toBe("mdi:calendar-clock");
+    expect(sourceIcon("manual")).toBe("mdi:hand-back-right");
+    expect(sourceIcon("external")).toBe("mdi:gesture-tap-button");
   });
 });
 

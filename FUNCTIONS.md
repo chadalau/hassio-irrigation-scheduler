@@ -133,7 +133,7 @@ Cria o controlador de uma zona e inicializa timers, estado da rega e listeners.
 | `is_watering` | Informa se a zona esta regando. |
 | `started_at` | Inicio da rega atual. |
 | `finishes_at` | Fim previsto da rega atual. |
-| `active_source` | Origem da rega: `schedule` ou `manual`. |
+| `active_source` | Origem da rega: `schedule`, `manual` ou `external` (alvo atuado fora da integracao -- ver `_async_start_external_run`). |
 | `active_schedule_id` | ID do horario que iniciou a rega. |
 | `active_duration` | Duracao da rega atual em segundos. |
 | `next_run` | Proximo disparo calculado. |
@@ -149,7 +149,7 @@ Cria o controlador de uma zona e inicializa timers, estado da rega e listeners.
 | `ph_min` / `ph_max` | Faixa de pH (0-14) que permite uma rega agendada comecar. |
 | `ec_entity_id` | Entidade do sensor de EC (condutividade); **so exibicao**, nunca trava uma rega. |
 | `ph_entity_id_2` / `ph_min_2` / `ph_max_2` / `ec_entity_id_2` | Mesmos campos, para um SEGUNDO reservatorio independente (ex.: uma tomada/bomba que alimenta dois reservatorios). Totalmente opcional e independente do reservatorio 1 -- ver `_check_ph_gate`. |
-| `schedule_warnings` | Dicionario `{schedule_id: motivo}` dos horarios cuja ultima rega agendada foi pulada pelo gate de pH. Em memoria apenas (nao sobrevive a restart). Quando ha 2 reservatorios configurados, o motivo e prefixado com `R1:`/`R2:` para indicar qual bloqueou. |
+| `schedule_warnings` | Dicionario `{schedule_id: motivo}` dos horarios cuja ultima rega AGENDADA nao completou normalmente -- pulada pelo gate de pH (`_check_ph_gate`, motivo prefixado com `R1:`/`R2:` quando ha 2 reservatorios), a tomada nunca ligou (`WARNING_TARGET_NEVER_ACTUATED`, setado em `_async_start_run`'s turn_on exception e em `_async_actuation_check_fired`) ou a tomada desligou sozinha antes do fim (`WARNING_TARGET_STOPPED_EARLY`, setado em `_async_target_state_changed`). So para regas AGENDADAS -- `water_now` nunca seta nem e afetado por isso, mesma exclusao do gate de pH. Em memoria apenas (nao sobrevive a restart); zerado no proprio schedule_id assim que ele inicia uma rega com sucesso de novo (`_async_start_run`). |
 | `history` | Lista das regas concluidas nos ultimos 30 dias (mais recente primeiro), carregada do Store em `async_setup()` e atualizada a cada `_async_log_history`. Sobrevive a restart. |
 | `last_run` | A entrada mais recente de `history`, ou `None`. |
 
@@ -254,7 +254,14 @@ do save bem-sucedido liga o alvo, arma imediatamente o timer de VERIFICACAO
 DE ATUACAO e so entao o timer de desligamento (nessa ordem: para uma rega
 com `duration < ACTUATION_GRACE` os dois disparam no mesmo instante, e
 callbacks no mesmo instante rodam na ordem de registro -- a verificacao de
-atuacao precisa ser a decisora, nao o timer generico de parada).
+atuacao precisa ser a decisora, nao o timer generico de parada). Se o
+`turn_on` em si lancar (dispositivo inalcancavel), desliga defensivamente e
+delega a `_async_abort_run()`; para uma rega AGENDADA, marca
+`schedule_warnings[schedule_id] = WARNING_TARGET_NEVER_ACTUATED` antes disso
+(mesmo texto/badge do caminho de `_async_actuation_check_fired`). No inicio,
+`schedule_warnings.pop(schedule_id, None)` remove qualquer aviso anterior
+daquele horario (de pH ou de atuacao) -- ele esta prestes a regar de novo,
+entao o aviso antigo nao se aplica mais.
 
 #### `_async_finish_run(turn_off, remove_state, expected_run_id, log_history=True)`
 
@@ -331,7 +338,11 @@ turn_off=True, ...)`, que tenta desligar ate tres vezes com confirmacao e
 PRESERVA o Store se o alvo nunca confirmar desligado -- uma atuacao tardia
 (o dispositivo so liga DEPOIS do aborto, ex. um retry de rota numa rede
 mesh) nao fica sem nenhum vigilante: a recuperacao pos-restart pega o
-registro preservado e tenta desligar de novo no proximo boot.
+registro preservado e tenta desligar de novo no proximo boot. Para uma rega
+AGENDADA, marca `schedule_warnings[schedule_id] = WARNING_TARGET_NEVER_
+ACTUATED` ANTES de chamar `_async_finish_run` (que limpa `_active_source`/
+`_active_schedule_id`) -- mesmo badge `!`/tooltip do gate de pH no card,
+sinalizando "tomada nao ligou" em vez de "pH fora do intervalo".
 
 #### `_async_schedule_fired()`
 
@@ -364,7 +375,11 @@ fora de faixa).
 
 #### `_async_target_state_changed(event)`
 
-Detecta desligamento externo. Usa o estado atual da entidade (nunca o
+Registrado incondicionalmente em `async_setup` (nao so enquanto rega): se a
+zona NAO esta regando, delega a `_async_maybe_start_external_run` em vez de
+ignorar o evento -- e assim que uma ativacao fora da integracao (botao
+fisico, app do proprio dispositivo, outra automacao) e detectada. Enquanto
+JA esta regando, detecta desligamento externo. Usa o estado atual da entidade (nunca o
 snapshot do evento) e ignora eventos `off` durante a janela de atuacao para
 evitar ecos atrasados. Quando o estado atual mostra o alvo ATUADO, seta a
 flag sticky `_active_actuated = True` imediatamente (independente da janela
@@ -378,7 +393,46 @@ turn_off sequer tentado) e descartaria o registro de recuperacao sem
 confirmacao, violando a mesma politica que `confirmed_off_states` garante em
 todo o resto do codigo. O timer normal de parada (que usa `turn_off=True`
 com retry/confirmacao/retencao) continua sendo quem encerra a rega nesses
-casos.
+casos. Quando a parada externa e realmente aceita (fora da janela de graca)
+para uma rega AGENDADA, marca `schedule_warnings[schedule_id] =
+WARNING_TARGET_STOPPED_EARLY` ANTES de chamar `_async_finish_run` --
+ambiguo entre uma queda real de energia/conexao e uma parada externa
+intencional (outra automacao, override manual), mas nao ha como distinguir
+so pelo estado da entidade, entao os dois casos mostram o mesmo aviso. A
+rega continua sendo registrada normalmente no historico (ela regou, so nao
+completou o tempo previsto) -- o aviso e so informativo, nao afeta
+`log_history`.
+
+#### `_async_maybe_start_external_run()`
+
+Chamado por `_async_target_state_changed` quando a zona NAO esta regando.
+Ignora qualquer coisa que nao seja um estado atuado agora mesmo (`off`/
+`closed`, `unavailable`/`unknown`, entidade ausente -- mesmo raciocinio
+fail-safe de `off_states` usado em todo o resto do codigo); caso contrario
+delega a `_async_start_external_run()`.
+
+#### `_async_start_external_run()`
+
+Rastreia uma rega iniciada FORA da integracao (botao fisico, app do proprio
+dispositivo, outra automacao). O alvo ja esta confirmado atuado -- e
+literalmente o que disparou este metodo -- entao pula a chamada de
+`turn_on` e a verificacao de atuacao com janela de graca que
+`_async_start_run` precisa para um comando que ela mesma acabou de emitir
+(`_active_actuated` comeca `True`, nao `False`). Tudo o mais segue o MESMO
+ciclo de vida de qualquer rega: persistencia no Store (`source: "external"`,
+`schedule_id: None`, `actuated: true`), indicador "Regando" ao vivo no card,
+e o timer de PARADA como rede de seguranca -- armado para
+`default_duration` da zona (nao ha como saber quanto tempo quem ligou
+pretendia deixar aberto, entao usa a mesma duracao padrao de um `water_now`
+sem duracao explicita). O gate de pH NAO se aplica aqui: ele so trava uma
+decisao que a integracao esteja prestes a tomar, e a essa altura o alvo ja
+esta ligado -- nao ha mais nada a bloquear. Se o `async_save_entry` falhar,
+reverte todo o estado em memoria SEM tentar desligar o alvo (nunca o
+comandamos, entao nao ha base para presumir que deveria ser desligado; so a
+nossa contabilidade falhou). Encerra pelos caminhos normais
+(`_async_stop_timer_fired` no `finishes_at`, ou um desligamento externo
+confirmado antes disso via `_async_target_state_changed`), entao historico e
+deducao do reservatorio funcionam identicos a qualquer outra rega.
 
 #### `_reschedule_next()`
 
@@ -685,6 +739,8 @@ Arquivo fonte: `frontend-src/src/card.ts`.
 | `formatSensorReading` | Arredonda uma leitura de sensor (pH/EC) a 2 casas e anexa a unidade; `?` para valor nao finito. |
 | `dayLabelFor` | "Hoje" / "Ontem" / "12/08" para uma data relativa a `nowIso`, ambas avaliadas no `timeZone` do SERVIDOR HA (nao o fuso do navegador) quando informado; `""` se nao parseavel. |
 | `groupHistoryByDay` | Agrupa entradas de historico por dia CALENDARIO no `timeZone` do servidor (mesmo raciocinio de `dayLabelFor` -- sem isso, um admin em outro fuso veria uma rega agrupada no dia errado), somando o volume total de cada dia via `totalVolumeMl`. |
+| `scheduleStatusToday` | Status do horario HOJE, no `timeZone` do servidor: `"warning"` (prioridade sobre tudo, de `schedule_warnings`), `"pending"` (hoje e um dos dias do horario e o horario ainda nao chegou), `"done"` (hoje e um dos dias, o horario ja passou, e existe uma entrada em `history` do MESMO `schedule_id` no MESMO dia calendario), ou `null` (horario desabilitado, hoje nao e um dos dias, ou o horario ja passou sem aviso E sem entrada de historico correspondente -- ambiguo, nao vira nem "certo" nem "errado"). |
+| `sourceLabel` / `sourceIcon` | Rotulo ("agendada"/"manual"/"ativada no dispositivo") e icone mdi para o campo `source` de uma rega (`schedule`/`manual`/`external`); valores desconhecidos ou ausentes caem em "agendada" (comportamento ja existente antes de `external` existir). Usado no ultimo-rega, no historico e na barra "Regando" ao vivo. |
 
 ### Metodos do card
 
@@ -695,18 +751,18 @@ Arquivo fonte: `frontend-src/src/card.ts`.
 | `render` | Renderiza erro de configuracao ou o card da zona. Alem do prefixo `sensor.`, exige que a entidade tenha os atributos `switch_entity_id`/`binary_sensor_entity_id` (contrato exclusivo do sensor `next_run` desta integracao) antes de renderizar -- qualquer outro sensor HA cai no erro de configuracao em vez de tentar renderizar com atributos ausentes. |
 | `_renderCard` | Renderiza cabecalho em duas linhas: titulo + status/toggle/engrenagem na primeira; abaixo, uma linha por reservatorio "em uso" (`.header-badges`, grade de 6 colunas fixas -- rotulo/pH/EC/volume/estimativa/refil -- para R1 e R2 alinharem coluna a coluna). A linha R1 conta como em uso com pH OU EC configurados **OU** `reservoir_volume_l > 0` -- uma zona sem nenhum sensor de pH/EC mas com volume+vazao configurados ainda precisa mostrar os controles de volume/estimativa/refil. A linha R2 so aparece com pH2/EC2 configurados (nao herda o fallback de volume: os controles de volume ja aparecem uma vez na linha R1). Depois: proximo horario, ultima rega, separador, lista de horarios (sempre em ordem crescente via `sortSchedulesByTime`, independente da ordem de criacao), botoes de acao (`.action-circle`: dois circulos preenchidos, "+" abre o dialogo de adicionar horario e o play chama `water_now`) e settings. |
 | `_renderReservoirRow` | Renderiza uma linha de badges (rotulo opcional "R1"/"R2" + pH + EC + volume + estimativa + botao de refil) como um ARRAY de siblings (nao um template combinado) -- cada badge precisa ser filho direto de `.header-badges` para a grade CSS alinhar as colunas corretamente entre as duas linhas. O rotulo "R1"/"R2" SO e passado quando as DUAS linhas estao visiveis (nada a desambiguar com um reservatorio so); caso contrario o chamador passa `""` e um placeholder invisivel ocupa a celula, mantendo as 6 colunas fixas nas duas linhas. O texto do badge de pH/EC NAO leva mais o sufixo " R2": o rotulo da linha ja desambigua quando presente. O badge de volume (`reservoir_remaining_l`/`reservoir_volume_l`), a estimativa e o botao de refil sao os MESMOS elementos repetidos nas duas linhas quando ambas existem (a zona so tem um reservatorio configurado no sentido de rastreamento -- so a leitura de pH/EC e por reservatorio fisico; ver "Opcao A" na decisao de design). |
-| `_renderScheduleRow` | Renderiza um horario em duas linhas: hora + indicador fixo de 7 dias (`dayInitials`, cinza quando o dia nao esta marcado) + badge `!` (aviso em `schedule_warnings`) na linha de cima; duracao, volume total e ml por vaso na linha de baixo. O switch fica na coluna mais a esquerda da linha (fora do bloco de info), editar/excluir na coluna mais a direita. |
+| `_renderScheduleRow` | Renderiza um horario em duas linhas: hora + indicador fixo de 7 dias (`dayInitials`, cinza quando o dia nao esta marcado) + icone de status (via `scheduleStatusToday`) na linha de cima -- `!` amber (aviso em `schedule_warnings`, tooltip `"Aviso: ${warning}"`), `check-circle` verde ("Rega de hoje concluída") ou `clock-outline` neutro ("Ainda vai regar hoje"); nenhum icone quando o status e ambiguo. Duracao, volume total e ml por vaso na linha de baixo. O switch fica na coluna mais a esquerda da linha (fora do bloco de info), editar/excluir na coluna mais a direita. |
 | `_renderDialog` | Renderiza o formulario de adicionar/editar horario. A duracao usa uma unica caixa hh:mm:ss (2 digitos cada, sem as setas de incremento do input number) em vez de campos separados de min/seg. Quando a vazao por vaso esta configurada, mostra tambem "Volume por vaso (ml)" calculado a partir da duracao. |
 | `_renderSettings` | Renderiza duracao padrao, vazao por vaso, vasos, reservatorio, o gate de pH R1 (sensor + faixa min/max), o sensor de EC R1 (so exibicao) e os mesmos 3 campos para o reservatorio R2 independente. |
 | `_sensorBadgeText` | Formata o texto do badge de pH/EC via uma funcao `render(value, unit)` fornecida pelo chamador -- o pH usa um sufixo fixo "PH" (ignora a unidade propria do sensor, evitando duplicar "PH 5.4pH"); o EC usa a unidade real do sensor. |
 | `_phStatusClass` | Retorna `in-range`/`out-of-range`/`""` para colorir o badge de pH conforme a leitura atual esta dentro de `[ph_min, ph_max]`. |
 | `_openMoreInfo` | Despacha o evento `hass-more-info` (dialogo nativo do HA, com o historico/grafico diario) para a entidade clicada -- usado pelos badges de pH/EC. |
 | `_lastRunAttr` / `_historyAttr` | Leem e validam estruturalmente `last_run`/`history` dos atributos do binary_sensor. |
-| `_lastRunText` | Formata a linha "Ultima rega: Hoje 06:00 · agendada · 6 min · 800 ml/vaso". |
+| `_lastRunText` | Formata a linha "Ultima rega: Hoje 06:00 · agendada · 6 min · 800 ml/vaso" (fonte via `sourceLabel`, tambem cobre "ativada no dispositivo"). |
 | `_openHistory` / `_closeHistory` | Abrem/fecham o dialogo de historico. |
 | `_renderHistoryDialog` | Renderiza o dialogo de historico: estatisticas do periodo (contagem, total) e a lista agrupada por dia via `groupHistoryByDay`. |
 | `_renderHistoryDayGroup` | Renderiza o cabecalho de um dia (label + contagem + total) e suas entradas. |
-| `_renderHistoryEntry` | Renderiza uma rega do historico: horario, fonte (agendada/manual), duracao, ml/vaso e pH/EC dos dois reservatorios (quando presentes; R2 sufixado " R2"). |
+| `_renderHistoryEntry` | Renderiza uma rega do historico: horario, fonte (via `sourceLabel`/`sourceIcon` -- agendada/manual/ativada no dispositivo), duracao, ml/vaso e pH/EC dos dois reservatorios (quando presentes; R2 sufixado " R2"). |
 | `_waterNow` | Chama `water_now`. |
 | `_stopWatering` | Chama `stop`. |
 | `_refillReservoir` | Confirma com o usuario (`window.confirm`) e, se aceito, chama `refill_reservoir`. |

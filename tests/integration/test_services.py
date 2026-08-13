@@ -71,6 +71,25 @@ async def test_water_now_turns_target_on_and_off_after_duration(
     assert hass.states.get(binary_eid).state == STATE_OFF
 
 
+async def test_overlapping_schedule_slots_are_rejected(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    entry = await setup_zone(target_entity_id="switch.zone1", name="Garden")
+    sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
+    payload = {
+        "entity_id": sensor_eid,
+        CONF_SCHEDULES: [
+            {"id": "a", "time": "06:00:00", "days": [0], "duration": 60},
+            {"id": "b", "time": "06:00:00", "days": [0], "duration": 120},
+        ],
+    }
+
+    with pytest.raises(ServiceValidationError, match="overlap"):
+        await hass.services.async_call(
+            DOMAIN, SERVICE_SET_SCHEDULES, payload, blocking=True
+        )
+
+
 async def test_water_now_duration_is_clamped_to_max_duration(
     hass: HomeAssistant, setup_zone, mock_homeassistant_services
 ) -> None:

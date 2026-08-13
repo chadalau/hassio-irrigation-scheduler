@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import voluptuous as vol
@@ -50,6 +51,24 @@ DEFAULT_DURATION_MINUTES = DEFAULT_DEFAULT_DURATION // 60
 MAX_DURATION_MINUTES = DEFAULT_MAX_DURATION // 60
 
 _TARGET_DOMAINS = ["switch", "valve", "input_boolean", "light"]
+
+
+def _safe_int(value: Any, default: int, *, minimum: int = 0) -> int:
+    """Coerce persisted options without letting a corrupt entry break UI."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return parsed if not isinstance(value, bool) and parsed >= minimum else default
+
+
+def _safe_float(value: Any, default: float) -> float:
+    """Return a finite persisted float, falling back for corrupt values."""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return parsed if math.isfinite(parsed) else default
 
 
 class IrrigationSchedulerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -242,41 +261,49 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
         """Manage durations for the zone."""
         errors: dict[str, str] = {}
 
-        current_default_min = (
-            int(
+        current_default_min = max(
+            1,
+            _safe_int(
                 self.config_entry.options.get(
                     CONF_DEFAULT_DURATION, DEFAULT_DEFAULT_DURATION
-                )
+                ),
+                DEFAULT_DEFAULT_DURATION,
+                minimum=1,
             )
-            // 60
+            // 60,
         )
-        current_max_min = (
-            int(self.config_entry.options.get(CONF_MAX_DURATION, DEFAULT_MAX_DURATION))
-            // 60
+        current_max_min = max(
+            1,
+            _safe_int(
+                self.config_entry.options.get(CONF_MAX_DURATION, DEFAULT_MAX_DURATION),
+                DEFAULT_MAX_DURATION,
+                minimum=1,
+            )
+            // 60,
         )
-        current_flow = int(
+        current_flow = _safe_int(
             self.config_entry.options.get(
                 CONF_FLOW_RATE_LPH, DEFAULT_FLOW_RATE_LPH
-            )
+            ), DEFAULT_FLOW_RATE_LPH
         )
-        current_pots = int(
+        current_pots = _safe_int(
             self.config_entry.options.get(
                 CONF_NUMBER_OF_POTS, DEFAULT_NUMBER_OF_POTS
-            )
+            ), DEFAULT_NUMBER_OF_POTS
         )
-        current_reservoir = int(
+        current_reservoir = _safe_int(
             self.config_entry.options.get(
                 CONF_RESERVOIR_VOLUME_L, DEFAULT_RESERVOIR_VOLUME_L
-            )
+            ), DEFAULT_RESERVOIR_VOLUME_L
         )
         current_ph_entity = self.config_entry.options.get(
             CONF_PH_ENTITY_ID, DEFAULT_PH_ENTITY_ID
         )
-        current_ph_min = float(
-            self.config_entry.options.get(CONF_PH_MIN, DEFAULT_PH_MIN)
+        current_ph_min = _safe_float(
+            self.config_entry.options.get(CONF_PH_MIN, DEFAULT_PH_MIN), DEFAULT_PH_MIN
         )
-        current_ph_max = float(
-            self.config_entry.options.get(CONF_PH_MAX, DEFAULT_PH_MAX)
+        current_ph_max = _safe_float(
+            self.config_entry.options.get(CONF_PH_MAX, DEFAULT_PH_MAX), DEFAULT_PH_MAX
         )
         current_ec_entity = self.config_entry.options.get(
             CONF_EC_ENTITY_ID, DEFAULT_EC_ENTITY_ID
@@ -284,11 +311,11 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
         current_ph_entity_2 = self.config_entry.options.get(
             CONF_PH_ENTITY_ID_2, DEFAULT_PH_ENTITY_ID_2
         )
-        current_ph_min_2 = float(
-            self.config_entry.options.get(CONF_PH_MIN_2, DEFAULT_PH_MIN_2)
+        current_ph_min_2 = _safe_float(
+            self.config_entry.options.get(CONF_PH_MIN_2, DEFAULT_PH_MIN_2), DEFAULT_PH_MIN_2
         )
-        current_ph_max_2 = float(
-            self.config_entry.options.get(CONF_PH_MAX_2, DEFAULT_PH_MAX_2)
+        current_ph_max_2 = _safe_float(
+            self.config_entry.options.get(CONF_PH_MAX_2, DEFAULT_PH_MAX_2), DEFAULT_PH_MAX_2
         )
         current_ec_entity_2 = self.config_entry.options.get(
             CONF_EC_ENTITY_ID_2, DEFAULT_EC_ENTITY_ID_2

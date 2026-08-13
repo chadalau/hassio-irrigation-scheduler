@@ -401,6 +401,19 @@ export const cardStyles = css`
     flex-shrink: 0;
   }
 
+  .status-icon {
+    --mdc-icon-size: 18px;
+    flex-shrink: 0;
+  }
+
+  .status-icon.status-done {
+    color: var(--success-color, #4caf50);
+  }
+
+  .status-icon.status-pending {
+    color: var(--secondary-text-color);
+  }
+
   .schedule-duration {
     font-size: 0.9rem;
     color: var(--secondary-text-color);

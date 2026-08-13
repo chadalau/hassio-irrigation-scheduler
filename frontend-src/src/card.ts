@@ -29,7 +29,10 @@ import {
   progressPct,
   remainingSeconds,
   sanitizeSchedules,
+  scheduleStatusToday,
   sortSchedulesByTime,
+  sourceIcon,
+  sourceLabel,
   timeToSeconds,
   toServiceTime,
   totalVolumeMl,
@@ -86,6 +89,8 @@ export class IrrigationScheduleCard extends LitElement {
 
   @state()
   private _settingsOpen = false;
+
+  private _focusBeforeDialog: HTMLElement | null = null;
 
   @state()
   private _settingsDefaultDuration = "";
@@ -313,6 +318,7 @@ export class IrrigationScheduleCard extends LitElement {
 
     const finishesAt = this._stringAttr(binaryEntity, "finishes_at");
     const startedAt = this._stringAttr(binaryEntity, "started_at");
+    const activeSource = this._stringAttr(binaryEntity, "source");
     const nowIso =
       this._now > 0 ? new Date(this._now).toISOString() : new Date().toISOString();
     const remaining = finishesAt ? remainingSeconds(finishesAt, nowIso) : 0;
@@ -339,6 +345,7 @@ export class IrrigationScheduleCard extends LitElement {
             <button
               class="refill-button"
               title="Reabastecer reservatório"
+              aria-label="Reabastecer reservatório"
               @click=${this._refillReservoir}
             >
               <ha-icon icon="mdi:water-plus"></ha-icon>
@@ -373,6 +380,7 @@ export class IrrigationScheduleCard extends LitElement {
                 : html`<ha-switch disabled></ha-switch>`}
               <ha-icon-button
                 title="Configurar vazão e vasos"
+                aria-label="Configurar vazão e vasos"
                 @click=${this._openSettings}
               >
                 <ha-icon icon="mdi:cog"></ha-icon>
@@ -432,7 +440,11 @@ export class IrrigationScheduleCard extends LitElement {
                 <div class="watering-info">
                   <div class="watering-left">
                     <ha-icon icon="mdi:sprinkler-variant"></ha-icon>
-                    <span>Regando</span>
+                    <span>
+                      Regando${activeSource === "external"
+                        ? ` · ${sourceLabel(activeSource)}`
+                        : ""}
+                    </span>
                   </div>
                   <div class="watering-remaining">
                     ${formatRemaining(remaining)}
@@ -486,6 +498,9 @@ export class IrrigationScheduleCard extends LitElement {
                     flowRate,
                     numberOfPots,
                     scheduleWarnings[schedule.id],
+                    history,
+                    nowIso,
+                    this.hass?.config?.time_zone,
                   ),
                 )}
           </div>
@@ -493,7 +508,7 @@ export class IrrigationScheduleCard extends LitElement {
           <div class="section-divider"></div>
 
           <div class="actions">
-            <button class="action-circle" title="Adicionar horário" @click=${this._openAdd}>
+            <button class="action-circle" title="Adicionar horário" aria-label="Adicionar horário" @click=${this._openAdd}>
               <ha-icon icon="mdi:plus"></ha-icon>
             </button>
             ${showWaterNow
@@ -501,6 +516,7 @@ export class IrrigationScheduleCard extends LitElement {
                   <button
                     class="action-circle"
                     title="Regar agora"
+                    aria-label="Regar agora"
                     ?disabled=${wateringOn}
                     @click=${this._waterNow}
                   >
@@ -584,10 +600,14 @@ export class IrrigationScheduleCard extends LitElement {
     schedule: Schedule,
     flowRate: number,
     numberOfPots: number,
-    warning?: string,
+    warning: string | undefined,
+    history: readonly HistoryRun[],
+    nowIso: string,
+    timeZone: string | undefined,
   ): TemplateResult {
     const perPot = perPotVolumeMl(flowRate, schedule.duration);
     const total = totalVolumeMl(flowRate, schedule.duration, numberOfPots);
+    const status = scheduleStatusToday(schedule, Boolean(warning), history, nowIso, timeZone);
     return html`
       <div class="schedule-row">
         <ha-switch
@@ -606,15 +626,31 @@ export class IrrigationScheduleCard extends LitElement {
                 `,
               )}
             </div>
-            ${warning
+            ${status === "warning"
               ? html`
                   <ha-icon
                     class="warning-icon"
                     icon="mdi:alert"
-                    title=${`Última rega pulada: ${warning}`}
+                    title=${`Aviso: ${warning}`}
                   ></ha-icon>
                 `
-              : ""}
+              : status === "done"
+                ? html`
+                    <ha-icon
+                      class="status-icon status-done"
+                      icon="mdi:check-circle"
+                      title="Rega de hoje concluída"
+                    ></ha-icon>
+                  `
+                : status === "pending"
+                  ? html`
+                      <ha-icon
+                        class="status-icon status-pending"
+                        icon="mdi:clock-outline"
+                        title="Ainda vai regar hoje"
+                      ></ha-icon>
+                    `
+                  : ""}
           </div>
           <div class="schedule-duration">
             ${formatDuration(schedule.duration)}
@@ -627,10 +663,10 @@ export class IrrigationScheduleCard extends LitElement {
           </div>
         </div>
         <div class="schedule-actions">
-          <ha-icon-button title="Editar" @click=${() => this._openEdit(schedule)}>
+          <ha-icon-button title="Editar" aria-label="Editar horário" @click=${() => this._openEdit(schedule)}>
             <ha-icon icon="mdi:pencil"></ha-icon>
           </ha-icon-button>
-          <ha-icon-button title="Excluir" @click=${() => this._deleteSchedule(schedule)}>
+          <ha-icon-button title="Excluir" aria-label="Excluir horário" @click=${() => this._deleteSchedule(schedule)}>
             <ha-icon icon="mdi:delete"></ha-icon>
           </ha-icon-button>
         </div>
@@ -822,11 +858,14 @@ export class IrrigationScheduleCard extends LitElement {
   }
 
   private _openHistory(): void {
+    this._rememberDialogFocus();
     this._historyOpen = true;
+    this._focusOpenDialog();
   }
 
   private _closeHistory(): void {
     this._historyOpen = false;
+    this._restoreDialogFocus();
   }
 
   private _closeSettings(): void {
@@ -936,7 +975,10 @@ export class IrrigationScheduleCard extends LitElement {
     const phMax = Number.parseFloat(this._settingsPhMax);
     const validMin = Number.isFinite(phMin) && phMin >= 0 && phMin <= 14;
     const validMax = Number.isFinite(phMax) && phMax >= 0 && phMax <= 14;
-    if (validMin && validMax && phMin > phMax) {
+    const sensor = this._sensorEntity;
+    const effectiveMin = validMin ? phMin : (this._numberAttr(sensor, "ph_min") ?? 0);
+    const effectiveMax = validMax ? phMax : (this._numberAttr(sensor, "ph_max") ?? 14);
+    if ((validMin || validMax) && effectiveMin > effectiveMax) {
       this._settingsError = "O pH mínimo não pode ser maior que o pH máximo.";
       return;
     }
@@ -962,7 +1004,13 @@ export class IrrigationScheduleCard extends LitElement {
     const phMax2 = Number.parseFloat(this._settingsPhMax2);
     const validMin2 = Number.isFinite(phMin2) && phMin2 >= 0 && phMin2 <= 14;
     const validMax2 = Number.isFinite(phMax2) && phMax2 >= 0 && phMax2 <= 14;
-    if (validMin2 && validMax2 && phMin2 > phMax2) {
+    const effectiveMin2 = validMin2
+      ? phMin2
+      : (this._numberAttr(sensor, "ph_min_2") ?? 0);
+    const effectiveMax2 = validMax2
+      ? phMax2
+      : (this._numberAttr(sensor, "ph_max_2") ?? 14);
+    if ((validMin2 || validMax2) && effectiveMin2 > effectiveMax2) {
       this._settingsError = "O pH mínimo R2 não pode ser maior que o pH máximo R2.";
       return;
     }
@@ -1009,11 +1057,10 @@ export class IrrigationScheduleCard extends LitElement {
           hour: "2-digit",
           minute: "2-digit",
         }).format(date);
-    const sourceLabel = lastRun.source === "manual" ? "manual" : "agendada";
     const perPot = perPotVolumeMl(lastRun.flow_rate_lph, lastRun.duration);
     const parts = [
       [dayLabel, time].filter(Boolean).join(" "),
-      sourceLabel,
+      sourceLabel(lastRun.source),
       formatDuration(lastRun.duration),
     ];
     if (perPot !== null) {
@@ -1038,9 +1085,12 @@ export class IrrigationScheduleCard extends LitElement {
           class="dialog history-dialog"
           role="dialog"
           aria-modal="true"
+          aria-labelledby="irrigation-history-title"
+          tabindex="-1"
+          @keydown=${this._onDialogKeydown}
           @click=${(ev: Event) => ev.stopPropagation()}
         >
-          <div class="dialog-header">
+          <div class="dialog-header" id="irrigation-history-title">
             Histórico de regas
             <div class="history-subtitle">${zoneName} · últimos 30 dias</div>
           </div>
@@ -1092,11 +1142,10 @@ export class IrrigationScheduleCard extends LitElement {
           minute: "2-digit",
         }).format(date);
     const perPot = perPotVolumeMl(entry.flow_rate_lph, entry.duration);
-    const isManual = entry.source === "manual";
     return html`
       <div class="history-entry">
-        <ha-icon icon=${isManual ? "mdi:hand-back-right" : "mdi:calendar-clock"}></ha-icon>
-        <span>${time} · ${isManual ? "manual" : "agendada"}</span>
+        <ha-icon icon=${sourceIcon(entry.source)}></ha-icon>
+        <span>${time} · ${sourceLabel(entry.source)}</span>
         <span class="schedule-row-spacer"></span>
         <span class="history-entry-detail">
           ${formatDuration(entry.duration)}
@@ -1131,9 +1180,12 @@ export class IrrigationScheduleCard extends LitElement {
           class="dialog"
           role="dialog"
           aria-modal="true"
+          aria-labelledby="irrigation-schedule-dialog-title"
+          tabindex="-1"
+          @keydown=${this._onDialogKeydown}
           @click=${(ev: Event) => ev.stopPropagation()}
         >
-          <div class="dialog-header">
+          <div class="dialog-header" id="irrigation-schedule-dialog-title">
             ${this._editingId ? "Editar horário" : "Adicionar horário"}
           </div>
           <div class="dialog-body">
@@ -1284,7 +1336,12 @@ export class IrrigationScheduleCard extends LitElement {
       return false;
     }
     const v = value as Record<string, unknown>;
-    return typeof v.started_at === "string" && typeof v.duration === "number";
+    return (
+      typeof v.started_at === "string" &&
+      !Number.isNaN(Date.parse(v.started_at)) &&
+      typeof v.duration === "number" &&
+      Number.isFinite(v.duration)
+    );
   }
 
   private _lastRunAttr(entity: HassEntity | undefined): HistoryRun | null {
@@ -1506,6 +1563,7 @@ export class IrrigationScheduleCard extends LitElement {
   // ------------------------------------------------------------------
 
   private _openAdd(): void {
+    this._rememberDialogFocus();
     this._editingId = null;
     this._formTime = "00:00";
     this._formDays = [];
@@ -1514,9 +1572,11 @@ export class IrrigationScheduleCard extends LitElement {
     this._formDurationSec = 0;
     this._formError = null;
     this._dialogOpen = true;
+    this._focusOpenDialog();
   }
 
   private _openEdit(schedule: Schedule): void {
+    this._rememberDialogFocus();
     this._editingId = schedule.id;
     this._formTime = formatTime(schedule.time);
     this._formDays = [...schedule.days];
@@ -1526,12 +1586,63 @@ export class IrrigationScheduleCard extends LitElement {
     this._formDurationSec = total % 60;
     this._formError = null;
     this._dialogOpen = true;
+    this._focusOpenDialog();
   }
 
   private _closeDialog(): void {
     this._dialogOpen = false;
     this._editingId = null;
     this._formError = null;
+    this._restoreDialogFocus();
+  }
+
+  private _rememberDialogFocus(): void {
+    this._focusBeforeDialog =
+      (this.shadowRoot?.activeElement as HTMLElement | null) ??
+      (document.activeElement as HTMLElement | null);
+  }
+
+  private _focusOpenDialog(): void {
+    void this.updateComplete.then(() => {
+      this.shadowRoot?.querySelector<HTMLElement>('.dialog[role="dialog"]')?.focus();
+    });
+  }
+
+  private _restoreDialogFocus(): void {
+    const previous = this._focusBeforeDialog;
+    this._focusBeforeDialog = null;
+    void this.updateComplete.then(() => previous?.focus());
+  }
+
+  private _onDialogKeydown(ev: KeyboardEvent): void {
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      this._historyOpen ? this._closeHistory() : this._closeDialog();
+      return;
+    }
+    if (ev.key !== "Tab") {
+      return;
+    }
+    const dialog = ev.currentTarget as HTMLElement;
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+    if (focusable.length === 0) {
+      ev.preventDefault();
+      dialog.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (ev.shiftKey && this.shadowRoot?.activeElement === first) {
+      ev.preventDefault();
+      last.focus();
+    } else if (!ev.shiftKey && this.shadowRoot?.activeElement === last) {
+      ev.preventDefault();
+      first.focus();
+    }
   }
 
   private _saveDialog(): void {

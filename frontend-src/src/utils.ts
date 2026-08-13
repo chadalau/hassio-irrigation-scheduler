@@ -391,7 +391,7 @@ export interface HistoryDayGroup {
  * whoever is looking at the dashboard, not to the HA instance actually
  * running the schedule.
  */
-function dayKey(date: Date, timeZone?: string): string {
+export function dayKey(date: Date, timeZone?: string): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
@@ -462,4 +462,117 @@ export function groupHistoryByDay(
     }
   }
   return Array.from(groups.values());
+}
+
+/**
+ * Human label for a run's "source" -- "agendada" (a scheduled firing),
+ * "manual" (the card's own Regar agora / the water_now service), or
+ * "ativada no dispositivo" (the target was actuated OUTSIDE the
+ * integration: a physical button, the device's own app, another
+ * automation -- see the backend's SOURCE_EXTERNAL). Unknown/missing values
+ * fall back to "agendada" rather than throwing, since that was already this
+ * label's behavior before "external" existed.
+ */
+export function sourceLabel(source: string | null | undefined): string {
+  if (source === "manual") {
+    return "manual";
+  }
+  if (source === "external") {
+    return "ativada no dispositivo";
+  }
+  return "agendada";
+}
+
+/** mdi icon matching sourceLabel's three cases. */
+export function sourceIcon(source: string | null | undefined): string {
+  if (source === "manual") {
+    return "mdi:hand-back-right";
+  }
+  if (source === "external") {
+    return "mdi:gesture-tap-button";
+  }
+  return "mdi:calendar-clock";
+}
+
+/** Day of week (0 = Monday .. 6 = Sunday, this card's convention) for
+ * ``date`` IN ``timeZone`` -- same reasoning as ``dayKey``: the browser's
+ * own local zone would put the wrong weekday's schedule "today" if it
+ * differs from the HA server's. */
+function weekdayInZone(date: Date, timeZone?: string): number {
+  const label = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+  }).format(date);
+  const index = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(label);
+  // Intl always returns one of the 7 English abbreviations above; a -1
+  // (unexpected locale data) falls back to JS's own 0=Sunday getDay(),
+  // re-based to this card's 0=Monday convention, rather than crashing.
+  return index >= 0 ? index : (date.getDay() + 6) % 7;
+}
+
+/** Seconds since midnight for ``date`` IN ``timeZone``. */
+function secondsSinceMidnightInZone(date: Date, timeZone?: string): number {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const part = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  // Midnight is sometimes formatted as "24" by this Intl option; normalize
+  // it back to 0 so the seconds-since-midnight value stays in [0, 86400).
+  const hour = part("hour") % 24;
+  return hour * 3600 + part("minute") * 60 + part("second");
+}
+
+/** Today's status for one schedule, IN ``timeZone`` (the HA server's zone):
+ * ``"warning"`` when its last scheduled firing didn't complete normally
+ * (``hasWarning``, from ``schedule_warnings`` -- takes priority over
+ * everything else), ``"pending"`` when today is one of its days and the
+ * time hasn't arrived yet, ``"done"`` when today is one of its days, the
+ * time has passed, and a matching ``history`` entry (same ``schedule_id``,
+ * same calendar day) confirms it ran -- or ``null`` when none of that
+ * applies (today isn't an active day, the schedule is disabled, or the
+ * time already passed with no warning AND no matching history entry, which
+ * is ambiguous rather than a known-good or known-bad state). */
+export function scheduleStatusToday(
+  schedule: Schedule,
+  hasWarning: boolean,
+  history: readonly HistoryRun[],
+  nowIso: string,
+  timeZone?: string,
+): "done" | "pending" | "warning" | null {
+  if (hasWarning) {
+    return "warning";
+  }
+  if (!schedule.enabled) {
+    return null;
+  }
+  const now = new Date(nowIso);
+  if (Number.isNaN(now.getTime())) {
+    return null;
+  }
+  if (!schedule.days.includes(weekdayInZone(now, timeZone))) {
+    return null;
+  }
+  const scheduleSeconds = timeToSeconds(schedule.time);
+  if (scheduleSeconds < 0) {
+    return null;
+  }
+  if (secondsSinceMidnightInZone(now, timeZone) < scheduleSeconds) {
+    return "pending";
+  }
+  const today = dayKey(now, timeZone);
+  const ranToday = history.some(
+    (entry) => {
+      const startedAt = new Date(entry.started_at);
+      return (
+        entry.schedule_id === schedule.id &&
+        !Number.isNaN(startedAt.getTime()) &&
+        dayKey(startedAt, timeZone) === today
+      );
+    },
+  );
+  return ranToday ? "done" : null;
 }

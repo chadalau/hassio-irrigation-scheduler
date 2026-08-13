@@ -248,3 +248,17 @@ def test_fall_back_ambiguous_time_uses_earlier_occurrence() -> None:
     ]
     expected = datetime(2024, 11, 3, 1, 30, tzinfo=tz)  # fold=0 (EDT)
     assert compute_next_run(schedules, now) == expected
+
+
+def test_fall_back_never_returns_first_fold_after_it_is_past() -> None:
+    """Timeline comparison rejects fold=0 while now is already in fold=1."""
+    tz = _ny_tz()
+    now = datetime(2024, 11, 3, 1, 15, tzinfo=tz, fold=1)
+    schedules = [
+        {"time": "01:30:00", "days": [6], "duration": 900, "enabled": True}
+    ]
+
+    result = compute_next_run(schedules, now)
+
+    assert result == datetime(2024, 11, 10, 1, 30, tzinfo=tz)
+    assert result.astimezone(timezone.utc) > now.astimezone(timezone.utc)

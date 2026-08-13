@@ -107,14 +107,19 @@ def find_next_run(
         }
 
     Candidates are built with the tzinfo of ``now``. Only candidates strictly
-    after ``now`` are accepted and the smallest one is returned. Spring-forward
-    gap times are skipped for that day (see the module docstring).
+    after ``now`` on the UTC timeline are accepted and the smallest one is
+    returned. Comparing aware datetimes that share the same ``tzinfo`` compares
+    their wall clocks and ignores ``fold``; that can make the first occurrence
+    of a fall-back time look future while it is already past in UTC. Spring-
+    forward gap times are skipped for that day (see the module docstring).
     """
     if not enabled or not schedules:
         return None, None
 
     best: datetime | None = None
+    best_instant: datetime | None = None
     best_schedule: dict[str, Any] | None = None
+    now_instant = now.astimezone(timezone.utc) if now.tzinfo is not None else now
     for day_offset in range(_MAX_DAY_OFFSET):
         candidate_date = (now + timedelta(days=day_offset)).date()
         weekday = candidate_date.weekday()
@@ -136,10 +141,18 @@ def find_next_run(
             candidate = datetime.combine(
                 candidate_date, schedule_time, tzinfo=now.tzinfo
             )
-            if candidate <= now or not _local_time_exists(candidate):
+            if not _local_time_exists(candidate):
                 continue
-            if best is None or candidate < best:
+            candidate_instant = (
+                candidate.astimezone(timezone.utc)
+                if candidate.tzinfo is not None
+                else candidate
+            )
+            if candidate_instant <= now_instant:
+                continue
+            if best_instant is None or candidate_instant < best_instant:
                 best = candidate
+                best_instant = candidate_instant
                 best_schedule = schedule
 
     return best, best_schedule

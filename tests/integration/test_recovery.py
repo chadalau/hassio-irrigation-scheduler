@@ -692,6 +692,9 @@ async def test_recovery_keeps_store_when_defensive_turn_off_fails(
             "duration": 600,
             "source": "schedule",
             "schedule_id": "s1",
+            "run_uid": "ORIGINAL-RUN-UID",
+            "actuated": True,
+            "history_logged": False,
         },
     )
 
@@ -714,6 +717,12 @@ async def test_recovery_keeps_store_when_defensive_turn_off_fails(
     store = hass.data[DOMAIN]["store"]
     data = await store.async_load()
     assert entry_id in data["entries"]
+    # Boot reconciliation must not reinterpret the still-on target as a new
+    # external run and overwrite the recovery/accounting journal.
+    assert data["entries"][entry_id]["run_uid"] == "ORIGINAL-RUN-UID"
+    assert data["entries"][entry_id]["source"] == "schedule"
+    assert data["entries"][entry_id]["schedule_id"] == "s1"
+    assert not scheduler_of(entry).is_watering
     assert any(
         record.levelno == logging.ERROR and "keeping runtime state" in record.getMessage()
         for record in captured

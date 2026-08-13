@@ -880,6 +880,36 @@ describe("IrrigationScheduleCard last run + history dialog", () => {
     expect(card.shadowRoot?.querySelector(".last-run")).toBeNull();
   });
 
+  it("shows 'ativada no dispositivo' in the live watering bar for an external run", async () => {
+    const now = new Date();
+    const watering: HassEntity = {
+      entity_id: "binary_sensor.jardim_watering",
+      state: "on",
+      last_changed: "",
+      last_updated: "",
+      attributes: {
+        started_at: now.toISOString(),
+        finishes_at: new Date(now.getTime() + 60_000).toISOString(),
+        duration: 60,
+        source: "external",
+        schedule_id: null,
+        last_run: null,
+        history: [],
+      },
+    };
+    const card = await mountCard(
+      {
+        "sensor.jardim_next_run": baseSensor(),
+        "binary_sensor.jardim_watering": watering,
+      },
+      [],
+    );
+
+    const bar = card.shadowRoot?.querySelector(".watering-left");
+    expect(bar?.textContent).toContain("Regando");
+    expect(bar?.textContent).toContain("ativada no dispositivo");
+  });
+
   it("renders the last-run row from last_run, clickable to open the history dialog", async () => {
     const lastRun = historyRun({
       started_at: "2026-08-13T06:00:00Z",
@@ -961,6 +991,79 @@ describe("IrrigationScheduleCard last run + history dialog", () => {
     expect(text).toContain("manual");
     expect(text).toContain("10 min");
     expect(text).toContain("1.33 L/vaso");
+  });
+});
+
+describe("IrrigationScheduleCard schedule status icons (done/pending/warning)", () => {
+  beforeEach(() => {
+    // 2026-08-13T09:00:00Z is a Thursday -- baseSensor's s1 (06:00, every
+    // day) has already fired today; s2 (18:00, every day) has not yet.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-13T09:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("shows a pending clock icon for a schedule not yet due today", async () => {
+    const card = await mountCard(
+      {
+        "sensor.jardim_next_run": baseSensor(),
+        "binary_sensor.jardim_watering": baseBinarySensor(),
+      },
+      [],
+    );
+    const rows = card.shadowRoot?.querySelectorAll(".schedule-row") ?? [];
+    expect(rows).toHaveLength(2);
+    // s1 (06:00, already passed, no history) -> ambiguous, no icon.
+    expect(rows[0].querySelector(".status-icon")).toBeNull();
+    // s2 (18:00, still ahead) -> pending.
+    const pending = rows[1].querySelector(".status-pending");
+    expect(pending).not.toBeNull();
+    expect(pending?.getAttribute("title")).toBe("Ainda vai regar hoje");
+  });
+
+  it("shows a done checkmark when a matching history entry confirms it ran today", async () => {
+    const ranToday = historyRun({
+      schedule_id: "s1",
+      started_at: "2026-08-13T06:00:05Z",
+    });
+    const card = await mountCard(
+      {
+        "sensor.jardim_next_run": baseSensor(),
+        "binary_sensor.jardim_watering": baseBinarySensor({
+          history: [ranToday],
+        }),
+      },
+      [],
+    );
+    const rows = card.shadowRoot?.querySelectorAll(".schedule-row") ?? [];
+    const done = rows[0].querySelector(".status-done");
+    expect(done).not.toBeNull();
+    expect(done?.getAttribute("title")).toBe("Rega de hoje concluída");
+  });
+
+  it("shows the warning icon instead of done/pending when schedule_warnings has an entry", async () => {
+    const ranToday = historyRun({
+      schedule_id: "s1",
+      started_at: "2026-08-13T06:00:05Z",
+    });
+    const card = await mountCard(
+      {
+        "sensor.jardim_next_run": baseSensor({
+          schedule_warnings: { s1: "Tomada não ligou (verifique energia/conexão)" },
+        }),
+        "binary_sensor.jardim_watering": baseBinarySensor({
+          history: [ranToday],
+        }),
+      },
+      [],
+    );
+    const rows = card.shadowRoot?.querySelectorAll(".schedule-row") ?? [];
+    expect(rows[0].querySelector(".warning-icon")).not.toBeNull();
+    expect(rows[0].querySelector(".status-done")).toBeNull();
+    expect(rows[0].querySelector(".status-pending")).toBeNull();
   });
 });
 

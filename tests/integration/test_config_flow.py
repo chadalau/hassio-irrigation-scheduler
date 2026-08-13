@@ -131,7 +131,6 @@ async def test_options_flow_changes_durations_without_reload_or_interrupt(
     scheduler_before = scheduler_of(entry)
     assert scheduler_before.is_watering
     assert hass.states.get("switch.zone1").state == STATE_ON
-
     # Open the options flow for this entry (handler == entry_id).
     result = await hass.config_entries.options.async_init(
         entry.entry_id, context={"show_advanced_options": False}
@@ -162,3 +161,24 @@ async def test_options_flow_changes_durations_without_reload_or_interrupt(
     assert entry.runtime_data is scheduler_before
     assert scheduler_of(entry).is_watering
     assert hass.states.get("switch.zone1").state == STATE_ON
+
+
+async def test_options_flow_opens_with_corrupt_persisted_values(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    entry = await setup_zone(
+        target_entity_id="switch.zone1",
+        options={
+            CONF_ENABLED: True,
+            CONF_DEFAULT_DURATION: "bad",
+            CONF_MAX_DURATION: None,
+            CONF_FLOW_RATE_LPH: "bad",
+            CONF_NUMBER_OF_POTS: False,
+            CONF_RESERVOIR_VOLUME_L: [],
+            CONF_SCHEDULES: [],
+        },
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] == FlowResultType.FORM

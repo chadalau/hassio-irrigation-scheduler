@@ -34,12 +34,15 @@ Shape of the stored payload::
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import timedelta
 from typing import Any, Callable
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
+
+_LOGGER = logging.getLogger(__name__)
 
 from .const import STORE_KEY, STORE_VERSION
 
@@ -101,6 +104,24 @@ class RuntimeStore:
             data["entries"][entry_id] = run_state
             await self._store.async_save(data)
 
+    async def async_create_entry(
+        self, entry_id: str, run_state: dict[str, Any]
+    ) -> bool:
+        """Create a run entry only when none exists, atomically.
+
+        Returns ``False`` without writing when a recovery record already
+        occupies ``entry_id``. This prevents external-activation reconciliation
+        or a concurrent state event from destroying that older run's identity
+        and exactly-once accounting journal.
+        """
+        async with self._lock:
+            data = await self._async_load_unlocked()
+            if entry_id in data["entries"]:
+                return False
+            data["entries"][entry_id] = run_state
+            await self._store.async_save(data)
+            return True
+
     async def async_update_entry(
         self,
         entry_id: str,
@@ -128,11 +149,17 @@ class RuntimeStore:
             data["entries"][entry_id] = new_state
             await self._store.async_save(data)
 
-    async def async_remove_entry(self, entry_id: str) -> None:
+    async def async_remove_entry(
+        self, entry_id: str, *, expected_run_uid: str | None = None
+    ) -> None:
         """Remove the run state for a config entry, if present."""
         async with self._lock:
             data = await self._async_load_unlocked()
-            if entry_id in data["entries"]:
+            current = data["entries"].get(entry_id)
+            if current is not None and (
+                expected_run_uid is None
+                or current.get("run_uid") == expected_run_uid
+            ):
                 del data["entries"][entry_id]
                 await self._store.async_save(data)
 
@@ -159,25 +186,55 @@ class RuntimeStore:
         *,
         max_age_days: int,
         max_entries: int,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], bool]:
         """Prepend a completed-run record, prune, persist, and return the
-        resulting most-recent-first list."""
+        resulting list plus whether this call inserted it.
+
+        ``run_uid`` makes retries/restart recovery idempotent. Legacy records
+        without it remain readable and are never considered duplicates.
+        """
         async with self._lock:
             data = await self._async_load_unlocked()
             entries = list(data["history"].get(entry_id, []))
+            run_uid = record.get("run_uid")
+            if run_uid and any(item.get("run_uid") == run_uid for item in entries):
+                return (
+                    _prune_history(
+                        entries, max_age_days=max_age_days, max_entries=max_entries
+                    ),
+                    False,
+                )
             entries.insert(0, record)
             entries = _prune_history(
                 entries, max_age_days=max_age_days, max_entries=max_entries
             )
             data["history"][entry_id] = entries
             await self._store.async_save(data)
-            return entries
+            return entries, True
 
     async def _async_load_unlocked(self) -> dict[str, Any]:
         """Load the payload; the caller MUST hold ``self._lock``."""
         data = await self._store.async_load()
-        if data is None:
+        if not isinstance(data, dict):
+            if data is not None:
+                _LOGGER.error("Invalid runtime Store payload; resetting it")
             data = {}
-        data.setdefault("entries", {})
-        data.setdefault("history", {})
+        if not isinstance(data.get("entries"), dict):
+            if "entries" in data:
+                _LOGGER.error("Invalid runtime Store entries section; resetting it")
+            data["entries"] = {}
+        if not isinstance(data.get("history"), dict):
+            if "history" in data:
+                _LOGGER.error("Invalid runtime Store history section; resetting it")
+            data["history"] = {}
+        data["entries"] = {
+            key: value
+            for key, value in data["entries"].items()
+            if isinstance(key, str) and isinstance(value, dict)
+        }
+        data["history"] = {
+            key: [item for item in value if isinstance(item, dict)]
+            for key, value in data["history"].items()
+            if isinstance(key, str) and isinstance(value, list)
+        }
         return data

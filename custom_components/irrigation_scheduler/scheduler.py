@@ -47,6 +47,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import uuid
 from datetime import datetime, timedelta
 from functools import partial
 from typing import Any, Callable
@@ -77,6 +78,7 @@ from .const import (
     CONF_PH_MIN,
     CONF_PH_MIN_2,
     CONF_RESERVOIR_REMAINING_L,
+    CONF_RESERVOIR_ACCOUNTED_RUNS,
     CONF_RESERVOIR_VOLUME_L,
     CONF_SCHEDULE_DURATION,
     CONF_SCHEDULE_ID,
@@ -104,6 +106,7 @@ from .const import (
     PH_SCALE_MAX,
     PH_SCALE_MIN,
     SIGNAL_UPDATE,
+    SOURCE_EXTERNAL,
     SOURCE_MANUAL,
     SOURCE_SCHEDULE,
 )
@@ -124,6 +127,18 @@ _LOGGER = logging.getLogger(__name__)
 # net that defensively turns the target off after the next boot.
 TURN_OFF_MAX_ATTEMPTS = 3
 TURN_OFF_RETRY_DELAY = 1
+
+# schedule_warnings text for the two "the target never actuated at all"
+# failure shapes (turn_on itself raised, or the target never left its off
+# state within ACTUATION_GRACE) -- surfaced on the card exactly like the pH
+# gate's warning badge.
+WARNING_TARGET_NEVER_ACTUATED = "Tomada não ligou (verifique energia/conexão)"
+# schedule_warnings text for a run that DID start but was cut short by a
+# confirmed external stop before its scheduled finishes_at -- ambiguous
+# between a real power/connectivity loss and an intentional external stop
+# (another automation, manual override), but surfaced the same way since
+# there is no way to tell them apart from the entity's state alone.
+WARNING_TARGET_STOPPED_EARLY = "Tomada desligou durante a rega (verifique energia/conexão)"
 
 
 class IrrigationScheduler:
@@ -180,8 +195,13 @@ class IrrigationScheduler:
         # _async_finish_run/_async_abort_run.
         self._active_actuated = False
 
+        # Stable persisted identifier for exactly-once history/accounting.
+        # Unlike the in-memory generation counter this survives a restart.
+        self._active_run_uid: str | None = None
+
         # When we issue our own turn_on/turn_off we must not react to it.
         self._suppress_state_listener = False
+        self._suppress_options_dispatch_once = False
 
         # Run generation token: incremented on every run start and finish. The
         # state-change listener captures it when the event fires and passes it
@@ -568,10 +588,14 @@ class IrrigationScheduler:
             max_age_days=HISTORY_RETENTION_DAYS,
             max_entries=HISTORY_MAX_ENTRIES,
         )
-        await self._async_recover_state()
+        recovery_pending = await self._async_recover_state()
         self._unsub_state = async_track_state_change_event(
             self.hass, [self.target_entity_id], self._async_target_state_changed
         )
+        # Close the event-only blind spot: the target may already be on when
+        # this integration starts (HA was down, or the entity loaded first).
+        if not self._is_watering and not recovery_pending:
+            await self._async_maybe_start_external_run()
         self._reschedule_next()
 
     async def async_unload(self) -> None:
@@ -605,9 +629,35 @@ class IrrigationScheduler:
 
     async def async_set_schedules(self, schedules: list[dict[str, Any]]) -> None:
         """Replace the full schedule list (stored in entry.options)."""
+        self._validate_schedule_slots(schedules)
         options = dict(self.entry.options)
         options[CONF_SCHEDULES] = schedules
         self.hass.config_entries.async_update_entry(self.entry, options=options)
+
+    def _validate_schedule_slots(self, schedules: list[dict[str, Any]]) -> None:
+        """Reject enabled schedules that compete for the same wall-clock slot.
+
+        The scheduler selects one item for a timestamp; accepting two would
+        silently starve every item after the first forever.
+        """
+        occupied: dict[tuple[int, str], str] = {}
+        for schedule in schedules:
+            if not schedule.get(CONF_ENABLED, True):
+                continue
+            schedule_time = str(schedule.get("time", ""))
+            schedule_id = str(schedule.get(CONF_SCHEDULE_ID, "<new>"))
+            days = schedule.get("days", [])
+            if not isinstance(days, (list, tuple)):
+                continue
+            for day in days:
+                slot = (day, schedule_time)
+                existing = occupied.get(slot)
+                if existing is not None:
+                    raise ServiceValidationError(
+                        f"Schedules {existing!r} and {schedule_id!r} overlap "
+                        f"on day {day} at {schedule_time}"
+                    )
+                occupied[slot] = schedule_id
 
     async def async_set_zone_options(
         self,
@@ -741,7 +791,9 @@ class IrrigationScheduler:
         }
         self.hass.config_entries.async_update_entry(self.entry, options=options)
 
-    def _deduct_reservoir_volume(self, liters: float) -> None:
+    def _deduct_reservoir_volume(
+        self, liters: float, run_uid: str | None = None
+    ) -> None:
         """Subtract ``liters`` actually delivered from the tracked remaining
         volume, clamped at 0. No-op when the zone has no reservoir volume
         configured (0) -- there is nothing to track. Called ONLY for runs
@@ -750,11 +802,22 @@ class IrrigationScheduler:
         """
         if self.reservoir_volume_l <= 0 or liters <= 0:
             return
+        accounted = self.entry.options.get(CONF_RESERVOIR_ACCOUNTED_RUNS, [])
+        if not isinstance(accounted, list):
+            accounted = []
+        if run_uid is not None and run_uid in accounted:
+            return
         new_remaining = max(0.0, self.reservoir_remaining_l - liters)
         options = {
             **dict(self.entry.options),
             CONF_RESERVOIR_REMAINING_L: new_remaining,
         }
+        if run_uid is not None:
+            options[CONF_RESERVOIR_ACCOUNTED_RUNS] = [
+                run_uid,
+                *[item for item in accounted if isinstance(item, str) and item != run_uid],
+            ][:HISTORY_MAX_ENTRIES]
+        self._suppress_options_dispatch_once = True
         self.hass.config_entries.async_update_entry(self.entry, options=options)
 
     async def async_add_schedule(self, schedule: dict[str, Any]) -> None:
@@ -822,6 +885,15 @@ class IrrigationScheduler:
 
     async def async_stop(self) -> None:
         """Stop the active watering run (turn the target off and clear state)."""
+        if not self._is_watering and self._async_target_is_actuated():
+            # A previous Store failure or a target already-on before setup
+            # must not make the integration's emergency stop a no-op.
+            self._suppress_state_listener = True
+            try:
+                await self._async_call_target_service(False)
+            finally:
+                self._suppress_state_listener = False
+            return
         await self._async_finish_run(turn_off=True, remove_state=True)
 
     async def async_options_updated(self) -> None:
@@ -830,6 +902,9 @@ class IrrigationScheduler:
         Only the next firing is recalculated; an active watering run is never
         interrupted by a reload.
         """
+        if self._suppress_options_dispatch_once:
+            self._suppress_options_dispatch_once = False
+            return
         self._reschedule_next()
         self._async_dispatch_update()
 
@@ -871,6 +946,7 @@ class IrrigationScheduler:
 
         now_utc = dt_util.utcnow()
         finishes_utc = now_utc + timedelta(seconds=duration)
+        run_uid = uuid.uuid4().hex
 
         # Capture this run's generation token: the deferred actuation check
         # (and any other callback racing this run) validates against it.
@@ -889,6 +965,7 @@ class IrrigationScheduler:
         self._active_ec_value_2 = self._read_sensor_value(self.ec_entity_id_2)
         self._active_ec_unit_2 = self._read_sensor_unit(self.ec_entity_id_2)
         self._active_actuated = False
+        self._active_run_uid = run_uid
 
         try:
             await self.store.async_save_entry(
@@ -913,6 +990,7 @@ class IrrigationScheduler:
                     # True via _async_store_mark_actuated() at the same
                     # points the in-memory flag is set.
                     "actuated": False,
+                    "run_uid": run_uid,
                 },
             )
         except Exception as err:  # noqa: BLE001 - revert, never leave the zone stuck
@@ -940,6 +1018,8 @@ class IrrigationScheduler:
             self._active_ph_value_2 = None
             self._active_ec_value_2 = None
             self._active_ec_unit_2 = None
+            self._active_actuated = False
+            self._active_run_uid = None
             return
 
         self._suppress_state_listener = True
@@ -967,6 +1047,12 @@ class IrrigationScheduler:
                 )
             finally:
                 self._suppress_state_listener = False
+            # Surfaced on the card exactly like the pH gate's warning badge
+            # (see _check_ph_gate) -- only for SCHEDULED runs, matching that
+            # same convention: a manual water_now failure is immediately
+            # visible to whoever just clicked it, no badge needed.
+            if source == SOURCE_SCHEDULE and schedule_id is not None:
+                self._schedule_warnings[schedule_id] = WARNING_TARGET_NEVER_ACTUATED
             await self._async_abort_run()
             return
         finally:
@@ -1067,6 +1153,7 @@ class IrrigationScheduler:
         # (neither flag nor current state) must not be logged as a
         # completed watering, regardless of which path is ending it.
         history_actuated = self._active_actuated or self._async_target_is_actuated()
+        history_run_uid = self._active_run_uid
         self._started_at = None
         self._finishes_at = None
         self._active_duration = None
@@ -1079,7 +1166,9 @@ class IrrigationScheduler:
         self._active_ec_value_2 = None
         self._active_ec_unit_2 = None
         self._active_actuated = False
+        self._active_run_uid = None
 
+        superseded = False
         if turn_off:
             off_confirmed = False
             for attempt in range(1, TURN_OFF_MAX_ATTEMPTS + 1):
@@ -1091,7 +1180,9 @@ class IrrigationScheduler:
                         "keeping it",
                         self.entry.entry_id,
                     )
-                    return
+                    superseded = True
+                    remove_state = False
+                    break
 
                 self._suppress_state_listener = True
                 try:
@@ -1126,7 +1217,7 @@ class IrrigationScheduler:
                     )
                     await self._async_wait(TURN_OFF_RETRY_DELAY)
 
-            if not off_confirmed:
+            if not off_confirmed and not superseded:
                 # The target could not be confirmed off: KEEP the runtime store
                 # entry -- it is the restart-recovery safety net that turns the
                 # target off defensively after the next boot if it really is
@@ -1141,38 +1232,39 @@ class IrrigationScheduler:
                 )
                 remove_state = False
 
-        # A new run may have started while we were turning the target off; in
-        # that case leave its state (and store entry) alone.
+        # A new run may have started while the old target command was in
+        # flight. Its target/store must be left alone, but the immutable
+        # snapshot captured above still needs history/accounting.
         if self._run_id != run_id:
-            _LOGGER.debug(
-                "A new watering run started while finishing %s; keeping it",
-                self.entry.entry_id,
-            )
-            return
+            superseded = True
+            remove_state = False
 
         will_log = log_history and history_actuated and history_started_at is not None
-        if remove_state:
-            await self.store.async_remove_entry(self.entry.entry_id)
-        elif will_log:
-            # The store entry SURVIVES (turn_off could not be confirmed; it
-            # is the restart-recovery record). We are about to log this run
-            # to history right now -- mark the surviving record so a LATER
-            # restart's downtime recovery does not log this SAME physical
-            # run a second time (and double-deduct the reservoir with it).
-            await self._async_store_mark_history_logged()
-
         if will_log:
-            await self._async_log_history(
+            logged = await self._async_log_history(
                 started_at=history_started_at,
                 finished_at=history_finished_at,
                 source=history_source,
                 schedule_id=history_schedule_id,
+                run_uid=history_run_uid,
                 ph_value=history_ph_value,
                 ec_value=history_ec_value,
                 ec_unit=history_ec_unit,
                 ph_value_2=history_ph_value_2,
                 ec_value_2=history_ec_value_2,
                 ec_unit_2=history_ec_unit_2,
+            )
+            if logged and not remove_state:
+                await self._async_store_mark_history_logged(history_run_uid)
+            if not logged:
+                # Keep the persisted record as an accounting retry journal.
+                # Recovery will retry the idempotent append on the next boot.
+                remove_state = False
+        if remove_state:
+            # Conditional removal avoids deleting a newer run that started
+            # while this run was finishing.
+            await self.store.async_remove_entry(
+                self.entry.entry_id, expected_run_uid=history_run_uid
             )
 
         _LOGGER.debug("Watering finished for %s", self.entry.entry_id)
@@ -1207,7 +1299,7 @@ class IrrigationScheduler:
 
         await self.store.async_update_entry(self.entry.entry_id, _mutate)
 
-    async def _async_store_mark_history_logged(self) -> None:
+    async def _async_store_mark_history_logged(self, run_uid: str | None = None) -> None:
         """Persist that this run's history entry (and reservoir deduction,
         which _async_log_history always performs together with it) has
         already been recorded.
@@ -1222,7 +1314,9 @@ class IrrigationScheduler:
         """
 
         def _mutate(run_state: dict[str, Any] | None) -> dict[str, Any] | None:
-            if run_state is None:
+            if run_state is None or (
+                run_uid is not None and run_state.get("run_uid") != run_uid
+            ):
                 return None
             run_state["history_logged"] = True
             return run_state
@@ -1242,7 +1336,8 @@ class IrrigationScheduler:
         ph_value_2: float | None = None,
         ec_value_2: float | None = None,
         ec_unit_2: str | None = None,
-    ) -> None:
+        run_uid: str | None = None,
+    ) -> bool:
         """Append a completed run to the history log.
 
         Best-effort: a storage hiccup here must never fail the run-finish
@@ -1256,6 +1351,7 @@ class IrrigationScheduler:
         """
         duration = max(0, int((finished_at - started_at).total_seconds()))
         record = {
+            "run_uid": run_uid,
             "started_at": started_at.isoformat(),
             "finishes_at": finished_at.isoformat(),
             "duration": duration,
@@ -1271,7 +1367,7 @@ class IrrigationScheduler:
             "ec_unit_2": ec_unit_2,
         }
         try:
-            self._history = await self.store.async_append_history(
+            self._history, inserted = await self.store.async_append_history(
                 self.entry.entry_id,
                 record,
                 max_age_days=HISTORY_RETENTION_DAYS,
@@ -1281,6 +1377,7 @@ class IrrigationScheduler:
             _LOGGER.exception(
                 "Failed to append watering history for %s", self.entry.entry_id
             )
+            return False
 
         # Deduct the water this run ACTUALLY delivered from the tracked
         # reservoir level. flow_rate_lph is L/h PER POT (see its docstring),
@@ -1297,7 +1394,8 @@ class IrrigationScheduler:
         # level never moved.
         pots = self.number_of_pots if self.number_of_pots > 0 else 1
         total_liters = (self.flow_rate_lph / 3600) * duration * pots
-        self._deduct_reservoir_volume(total_liters)
+        self._deduct_reservoir_volume(total_liters, run_uid)
+        return True
 
     async def _async_abort_run(self) -> None:
         """Abort a run whose target could not be actuated (fail loudly)."""
@@ -1317,6 +1415,7 @@ class IrrigationScheduler:
         self._active_ec_value_2 = None
         self._active_ec_unit_2 = None
         self._active_actuated = False
+        self._active_run_uid = None
         if self._async_target_is_off():
             await self.store.async_remove_entry(self.entry.entry_id)
         else:
@@ -1372,6 +1471,14 @@ class IrrigationScheduler:
             turn_on_service,
             self.entry.entry_id,
         )
+        # Surfaced on the card exactly like the pH gate's warning badge --
+        # captured BEFORE _async_finish_run clears _active_source/
+        # _active_schedule_id below. Only for SCHEDULED runs (manual
+        # water_now failures are immediately visible to whoever clicked it).
+        if self._active_source == SOURCE_SCHEDULE and self._active_schedule_id is not None:
+            self._schedule_warnings[self._active_schedule_id] = (
+                WARNING_TARGET_NEVER_ACTUATED
+            )
         # Let _async_finish_run own the turn_off: it retries with confirmation
         # and, if the target still cannot be confirmed off, PRESERVES the
         # runtime store entry so restart recovery keeps trying defensively. A
@@ -1533,10 +1640,20 @@ class IrrigationScheduler:
         return unit if isinstance(unit, str) else None
 
     async def _async_target_state_changed(self, event: Event) -> None:
-        """React to the target entity turning off externally."""
-        run_id = self._run_id
-        if self._suppress_state_listener or not self._is_watering:
+        """React to the target entity changing state, on OR off, at ANY time.
+
+        Registered unconditionally in ``async_setup`` (not just while
+        watering): a target actuated OUTSIDE the integration -- a physical
+        button, the device's own app, another automation -- while we are
+        NOT tracking a run is handed off to
+        ``_async_maybe_start_external_run`` instead of being ignored.
+        """
+        if self._suppress_state_listener:
             return
+        if not self._is_watering:
+            await self._async_maybe_start_external_run()
+            return
+        run_id = self._run_id
         # Decide by the CURRENT entity state, never by the ``new_state``
         # snapshot carried in the event. With an async device the echo of our
         # own turn_off can arrive AFTER a newer run started: the event payload
@@ -1579,7 +1696,7 @@ class IrrigationScheduler:
             if self._active_duration is not None
             else 0
         )
-        if self._started_at is not None and dt_util.utcnow() < self._started_at + timedelta(
+        if self._active_source != SOURCE_EXTERNAL and self._started_at is not None and dt_util.utcnow() < self._started_at + timedelta(
             seconds=grace
         ):
             return
@@ -1589,9 +1706,154 @@ class IrrigationScheduler:
             current.state if current is not None else "unknown",
             self.entry.entry_id,
         )
+        # Surfaced on the card exactly like the pH gate's warning badge --
+        # captured BEFORE _async_finish_run clears _active_source/
+        # _active_schedule_id below. Ambiguous between a genuine power/
+        # connectivity loss and an intentional external stop (another
+        # automation, manual override) -- there is no way to tell them apart
+        # from the entity's confirmed-off state alone, so both surface the
+        # same warning. Only for SCHEDULED runs, matching the pH gate's own
+        # manual-water_now exclusion.
+        if self._active_source == SOURCE_SCHEDULE and self._active_schedule_id is not None:
+            self._schedule_warnings[self._active_schedule_id] = (
+                WARNING_TARGET_STOPPED_EARLY
+            )
         await self._async_finish_run(
             turn_off=False, remove_state=True, expected_run_id=run_id
         )
+
+    async def _async_maybe_start_external_run(self) -> None:
+        """Check whether the target was just actuated OUTSIDE the
+        integration -- a physical button, the device's own app, another
+        automation -- while we are not tracking any run, and if so, start
+        tracking it (see ``_async_start_external_run``).
+
+        Ignores anything that is not a genuine actuated state right now:
+        ``off``/``closed`` (nothing happened), and ``unavailable``/
+        ``unknown``/entity-missing (not proof of anything, same fail-safe
+        reasoning as everywhere else ``off_states`` is used).
+        """
+        current = self.hass.states.get(self.target_entity_id)
+        if current is None or current.state in off_states(self.target_domain):
+            return
+        await self._async_start_external_run()
+
+    async def _async_start_external_run(self) -> None:
+        """Track a run that was started OUTSIDE the integration.
+
+        The target is already confirmed actuated -- that is literally what
+        triggered this -- so this skips the ``turn_on`` service call and the
+        deferred actuation-grace check that ``_async_start_run`` needs for a
+        command it just issued itself. Everything else goes through the
+        SAME lifecycle as any other run: Store persistence, a stop timer
+        (the safety net -- there is no way to know how long the person who
+        flipped it intended it to stay on, so it gets the zone's
+        ``default_duration``, exactly like a ``water_now`` with no explicit
+        duration), the live "watering" indicator, and history/reservoir
+        accounting when it ends via the normal ``_async_finish_run``/
+        ``_async_target_state_changed`` paths.
+
+        The pH gate does NOT apply here: it only gates a decision this
+        integration is about to make, and by the time this runs the target
+        is already on -- there is nothing left to block.
+        """
+        if self._is_watering:
+            return
+
+        duration = max(MIN_DURATION, min(self.default_duration, self.max_duration))
+        now_utc = dt_util.utcnow()
+        finishes_utc = now_utc + timedelta(seconds=duration)
+        run_uid = uuid.uuid4().hex
+
+        self._run_id += 1
+        self._is_watering = True
+        self._started_at = now_utc
+        self._finishes_at = finishes_utc
+        self._active_duration = duration
+        self._active_source = SOURCE_EXTERNAL
+        self._active_schedule_id = None
+        self._active_ph_value = self._read_sensor_value(self.ph_entity_id)
+        self._active_ec_value = self._read_sensor_value(self.ec_entity_id)
+        self._active_ec_unit = self._read_sensor_unit(self.ec_entity_id)
+        self._active_ph_value_2 = self._read_sensor_value(self.ph_entity_id_2)
+        self._active_ec_value_2 = self._read_sensor_value(self.ec_entity_id_2)
+        self._active_ec_unit_2 = self._read_sensor_unit(self.ec_entity_id_2)
+        # Actuation is not a hypothesis to verify here -- it is literally
+        # what triggered this method -- so both the in-memory sticky flag
+        # and its persisted mirror start out already True, unlike
+        # _async_start_run (which starts False and waits for the deferred
+        # actuation check to confirm the turn_on it just issued).
+        self._active_actuated = True
+        self._active_run_uid = run_uid
+
+        # Arm the physical safety net before persistence. A disk failure must
+        # degrade durability, never remove the only timer that closes water.
+        self._unsub_stop = async_track_point_in_time(
+            self.hass, self._async_stop_timer_fired, finishes_utc
+        )
+
+        created = True
+        try:
+            created = await self.store.async_create_entry(
+                self.entry.entry_id,
+                {
+                    "started_at": now_utc.isoformat(),
+                    "finishes_at": finishes_utc.isoformat(),
+                    "duration": duration,
+                    "source": SOURCE_EXTERNAL,
+                    "schedule_id": None,
+                    "ph_value": self._active_ph_value,
+                    "ec_value": self._active_ec_value,
+                    "ec_unit": self._active_ec_unit,
+                    "ph_value_2": self._active_ph_value_2,
+                    "ec_value_2": self._active_ec_value_2,
+                    "ec_unit_2": self._active_ec_unit_2,
+                    "actuated": True,
+                    "run_uid": run_uid,
+                },
+            )
+        except Exception as err:  # noqa: BLE001 - revert, never leave the zone stuck
+            _LOGGER.error(
+                "Failed to persist runtime state for an externally-activated "
+                "run on %s: %s; continuing with the in-memory safety timer",
+                self.entry.entry_id,
+                err,
+            )
+        if not created:
+            # A pending recovery record won the Store race. Never overwrite
+            # its run_uid/source/timestamps with a freshly inferred external
+            # run. Its recovery path remains authoritative.
+            self._cancel_stop()
+            self._is_watering = False
+            self._started_at = None
+            self._finishes_at = None
+            self._active_duration = None
+            self._active_source = None
+            self._active_schedule_id = None
+            self._active_ph_value = None
+            self._active_ec_value = None
+            self._active_ec_unit = None
+            self._active_ph_value_2 = None
+            self._active_ec_value_2 = None
+            self._active_ec_unit_2 = None
+            self._active_actuated = False
+            self._active_run_uid = None
+            _LOGGER.warning(
+                "Ignoring external activation reconciliation for %s because "
+                "a pending recovery record already exists",
+                self.entry.entry_id,
+            )
+            return
+        _LOGGER.info(
+            "External activation detected for %s; tracking as a run "
+            "(source=%s, duration=%ss, finishes_at=%s)",
+            self.entry.entry_id,
+            SOURCE_EXTERNAL,
+            duration,
+            finishes_utc.isoformat(),
+        )
+        self._reschedule_next()
+        self._async_dispatch_update()
 
     # ------------------------------------------------------------------
     # Next-run scheduling
@@ -1628,12 +1890,12 @@ class IrrigationScheduler:
     # ------------------------------------------------------------------
     # Restart recovery
     # ------------------------------------------------------------------
-    async def _async_recover_state(self) -> None:
-        """Resume an interrupted run, or defensively turn the target off."""
+    async def _async_recover_state(self) -> bool:
+        """Resume an interrupted run or turn it off; return pending-record state."""
         data = await self.store.async_load()
         run_state = data["entries"].get(self.entry.entry_id)
         if not run_state:
-            return
+            return False
 
         finishes_at = dt_util.parse_datetime(run_state.get("finishes_at"))
         if finishes_at is None:
@@ -1642,7 +1904,7 @@ class IrrigationScheduler:
                 self.entry.entry_id,
             )
             await self.store.async_remove_entry(self.entry.entry_id)
-            return
+            return False
         # Normalize a naive datetime (hand-edited/corrupted store; every
         # writer here persists aware UTC) before comparing against
         # dt_util.utcnow() -- naive < aware raises TypeError.
@@ -1670,7 +1932,6 @@ class IrrigationScheduler:
             # recovery record that makes the NEXT boot try again. Removing it
             # here would leave the valve open with no one to close it.
             if self._async_target_is_off():
-                await self.store.async_remove_entry(self.entry.entry_id)
                 # It ran its course during downtime: log it as a completed
                 # run (best-effort duration/start from the stored payload) --
                 # but ONLY when there is persisted evidence the target was
@@ -1684,6 +1945,7 @@ class IrrigationScheduler:
                 # already get logged (turn_off just could not be confirmed)
                 # would be logged AGAIN here, double-counting a single
                 # physical run in history and in the reservoir deduction.
+                logged = True
                 if run_state.get("actuated") and not run_state.get("history_logged"):
                     recovered_started_at = dt_util.parse_datetime(
                         run_state.get("started_at")
@@ -1697,18 +1959,24 @@ class IrrigationScheduler:
                     duration = self._coerce_stored_duration(
                         run_state.get("duration"), recovered_started_at, finishes_at
                     )
-                    await self._async_log_history(
+                    logged = await self._async_log_history(
                         started_at=recovered_started_at
                         or (finishes_at - timedelta(seconds=duration)),
                         finished_at=finishes_at,
                         source=run_state.get("source"),
                         schedule_id=run_state.get("schedule_id"),
+                        run_uid=run_state.get("run_uid"),
                         ph_value=run_state.get("ph_value"),
                         ec_value=run_state.get("ec_value"),
                         ec_unit=run_state.get("ec_unit"),
                         ph_value_2=run_state.get("ph_value_2"),
                         ec_value_2=run_state.get("ec_value_2"),
                         ec_unit_2=run_state.get("ec_unit_2"),
+                    )
+                if logged:
+                    await self.store.async_remove_entry(
+                        self.entry.entry_id,
+                        expected_run_uid=run_state.get("run_uid"),
                     )
             else:
                 _LOGGER.error(
@@ -1717,7 +1985,8 @@ class IrrigationScheduler:
                     self.target_entity_id,
                     self.entry.entry_id,
                 )
-            return
+                return True
+            return False
 
         # Resume: keep the run state and re-arm the stop timer. The stop
         # timer is armed against ``finishes_at`` (already validated above),
@@ -1789,14 +2058,28 @@ class IrrigationScheduler:
             await self._async_finish_run(
                 turn_off=True, remove_state=True, log_history=False
             )
-            return
+            data = await self.store.async_load()
+            return self.entry.entry_id in data["entries"]
         self._active_actuated = True
+        stored_run_uid = run_state.get("run_uid")
+        if not isinstance(stored_run_uid, str) or not stored_run_uid:
+            stored_run_uid = uuid.uuid4().hex
+
+            def _add_run_uid(current: dict[str, Any] | None) -> dict[str, Any] | None:
+                if current is None:
+                    return None
+                current["run_uid"] = stored_run_uid
+                return current
+
+            await self.store.async_update_entry(self.entry.entry_id, _add_run_uid)
+        self._active_run_uid = stored_run_uid
         await self._async_store_mark_actuated()
         _LOGGER.info(
             "Resumed watering for %s until %s",
             self.entry.entry_id,
             finishes_at.isoformat(),
         )
+        return False
 
     def _coerce_stored_duration(
         self,

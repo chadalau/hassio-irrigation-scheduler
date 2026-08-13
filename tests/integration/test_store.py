@@ -62,6 +62,32 @@ async def test_update_entry_does_not_touch_other_entries(hass: HomeAssistant) ->
     assert data["entries"]["zone-b"] == {"value": 2}
 
 
+async def test_create_entry_never_overwrites_existing_recovery_record(
+    hass: HomeAssistant,
+) -> None:
+    store = _store(hass)
+    original = {"run_uid": "original", "source": "schedule"}
+    await store.async_save_entry("zone-a", original)
+
+    created = await store.async_create_entry(
+        "zone-a", {"run_uid": "new", "source": "external"}
+    )
+
+    assert created is False
+    assert (await store.async_load())["entries"]["zone-a"] == original
+
+
+async def test_create_entry_creates_when_absent(hass: HomeAssistant) -> None:
+    store = _store(hass)
+
+    created = await store.async_create_entry(
+        "zone-a", {"run_uid": "new", "source": "external"}
+    )
+
+    assert created is True
+    assert (await store.async_load())["entries"]["zone-a"]["run_uid"] == "new"
+
+
 async def test_update_entry_serializes_concurrent_mutations_of_the_same_entry(
     hass: HomeAssistant,
 ) -> None:
@@ -96,3 +122,37 @@ async def test_update_entry_serializes_concurrent_mutations_of_the_same_entry(
         run_state = data["entries"]["zone-a"]
         assert run_state["field_1"] is True
         assert run_state["field_2"] is True
+
+
+async def test_load_repairs_structurally_invalid_payload(hass: HomeAssistant) -> None:
+    store = _store(hass)
+    store._store.async_load = lambda: _async_value([])
+    assert await store.async_load() == {"entries": {}, "history": {}}
+
+
+async def _async_value(value):
+    return value
+
+
+async def test_load_repairs_invalid_sections(hass: HomeAssistant) -> None:
+    store = _store(hass)
+    store._store.async_load = lambda: _async_value(
+        {"entries": [], "history": {"good": [{"started_at": "bad"}], "bad": "x"}}
+    )
+    data = await store.async_load()
+    assert data["entries"] == {}
+    assert "bad" not in data["history"]
+
+
+async def test_history_append_is_idempotent_by_run_uid(hass: HomeAssistant) -> None:
+    store = _store(hass)
+    record = {"run_uid": "run-1", "started_at": "2099-01-01T00:00:00+00:00"}
+    history, inserted = await store.async_append_history(
+        "zone-a", record, max_age_days=30000, max_entries=10
+    )
+    assert inserted is True
+    history, inserted = await store.async_append_history(
+        "zone-a", record, max_age_days=30000, max_entries=10
+    )
+    assert inserted is False
+    assert len(history) == 1

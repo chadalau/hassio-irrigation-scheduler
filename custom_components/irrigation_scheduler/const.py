@@ -38,6 +38,7 @@ CONF_EC_ENTITY_ID_2 = "ec_entity_id_2"
 # refill -- treated as "full" (== reservoir_volume_l) until then, see
 # IrrigationScheduler.reservoir_remaining_l.
 CONF_RESERVOIR_REMAINING_L = "reservoir_remaining_l"
+CONF_RESERVOIR_ACCOUNTED_RUNS = "reservoir_accounted_runs"
 CONF_SCHEDULES = "schedules"
 
 # Schedule keys.
@@ -97,6 +98,11 @@ HISTORY_MAX_ENTRIES = 200
 # Sources for a watering run.
 SOURCE_SCHEDULE = "schedule"
 SOURCE_MANUAL = "manual"
+# The target was actuated OUTSIDE the integration (physical button, the
+# device's own app, another automation) while we were not tracking a run.
+# Treated like a water_now with the zone's default_duration -- see
+# IrrigationScheduler._async_start_external_run.
+SOURCE_EXTERNAL = "external"
 
 # Service names.
 SERVICE_WATER_NOW = "water_now"
