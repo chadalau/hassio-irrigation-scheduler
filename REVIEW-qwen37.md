@@ -1,61 +1,107 @@
-# REVIEW-qwen37.md — Revisão Adversarial Final (qwen3.7-max)
+# REVIEW-qwen37.md — Auditoria Adversarial Independente
 
-**Data**: 2026-08-12  
-**Revisor**: qwen3.7-max (independente, sem comparação com outros reviewers)  
-**Escopo**: Backend completo, frontend completo, testes (puros + integração + frontend)  
-**Estado do working tree**: Código encerrado pelo usuário; incluindo alterações não commitadas  
+**Data**: 2026-08-13  
+**Escopo**: Working tree completo (backend, frontend, testes)  
+**Modelo**: qwen3.7-max  
+**Status final**: **APROVADO**
 
 ---
 
 ## Arquivos Revisados
 
 ### Backend (`custom_components/irrigation_scheduler/`)
-| Arquivo | Linhas | Descrição |
-|---|---|---|
-| `__init__.py` | 507 | Setup/teardown, serviços, frontend wiring, target resolution |
-| `const.py` | 121 | Constantes (domínios, defaults, services, plataformas) |
-| `scheduler.py` | 1871 | Core engine: lifecycle, pH gate, recovery, history, reservoir |
-| `schedules.py` | 65 | Pure helpers: serialize, new, merge (zero HA imports) |
-| `next_run.py` | 198 | Pure helpers: find_next_run, resolve_target_services, off_states |
-| `store.py` | 156 | RuntimeStore: lock-protected persistence, history pruning |
-| `sensor.py` | 160 | Next-run sensor + attribute contract + sibling resolution |
-| `binary_sensor.py` | 81 | Watering binary sensor (running device class) |
-| `switch.py` | 73 | Schedule-enabled switch |
-| `config_flow.py` | 467 | Config flow + options flow (R1+R2 pH/EC) |
-| `manifest.json` | 17 | Manifest (HA 2026.2.3, frontend+http deps) |
-| `services.yaml` | 263 | Service definitions (8 services) |
-| `strings.json` | 223 | UI strings (config, options, entities, services) |
+| Arquivo | Linhas |
+|---|---|
+| `__init__.py` | 507 |
+| `scheduler.py` | 2060 |
+| `store.py` | 183 |
+| `next_run.py` | 205 |
+| `schedules.py` | 65 |
+| `config_flow.py` | 467 |
+| `const.py` | 126 |
+| `sensor.py` | 160 |
+| `switch.py` | 73 |
+| `binary_sensor.py` | 81 |
 
 ### Frontend (`frontend-src/src/`)
-| Arquivo | Linhas | Descrição |
-|---|---|---|
-| `card.ts` | 1653 | Lit card: render, settings, dialog, history, actions |
-| `const.ts` | 9 | Domain + defaults |
-| `editor.ts` | 78 | Lovelace visual editor (ha-form) |
-| `styles.ts` | 707 | CSS (grid, badges, dialogs, compact mode) |
-| `types.ts` | 143 | TypeScript interfaces (Schedule, HistoryRun, CardConfig, etc.) |
-| `utils.ts` | 465 | Pure helpers: format, sanitize, volume, history grouping |
+| Arquivo | Linhas |
+|---|---|
+| `card.ts` | 1682 |
+| `editor.ts` | 86 |
+| `utils.ts` | 572 |
+| `types.ts` | 143 |
+| `styles.ts` | 720 |
+| `const.ts` | 9 |
 
 ### Testes
-| Arquivo | Testes | Descrição |
+| Arquivo | Linhas |
+|---|---|
+| `tests/test_next_run.py` | 250 |
+| `tests/test_schedules.py` | 126 |
+| `tests/pure_loader.py` | 32 |
+| `frontend-src/tests/editor.test.ts` | 143 |
+| `frontend-src/tests/card.test.ts` | 1302 |
+| `frontend-src/tests/utils.test.ts` | 728 |
+
+---
+
+## Verificação do Achado da Rodada Anterior
+
+### Editor visual: `_valueChanged` lendo `ev.detail.value` (CORRIGIDO)
+
+**Arquivo**: `frontend-src/src/editor.ts:71-85`
+
+O código atual lê corretamente `ev.detail.value` (a config completa emitida pelo `ha-form`):
+
+```typescript
+private _valueChanged(ev: CustomEvent): void {
+    const value = (ev.detail as { value?: Record<string, unknown> } | undefined)
+      ?.value;
+    if (!value || !this._config) { return; }
+    const config = { ...this._config, ...value } as CardConfig;
+    this.dispatchEvent(new CustomEvent("config-changed", { ... }));
+}
+```
+
+O comentário nas linhas 63-69 documenta explicitamente a correção. O teste de regressão em `editor.test.ts:66-112` dispara um evento `value-changed` com `{ detail: { value: { entity: ..., compact: true } } }` e verifica que `config-changed` é disparado com a config mergeada corretamente. **Teste passa.**
+
+---
+
+## Achados por Severidade
+
+### CRÍTICO — Nenhum
+
+### ALTO — Nenhum
+
+### MÉDIO — Nenhum
+
+### BAIXO (observações, não bugs)
+
+#### 1. Duplo dispatch em `_deduct_reservoir_volume` → `async_options_updated`
+- **Arquivo**: `scheduler.py:757-771` + `scheduler.py:1198-1199`
+- **Cenário**: `_deduct_reservoir_volume` atualiza `entry.options`, o que dispara o update listener → `async_options_updated()` → `_reschedule_next()` + `_async_dispatch_update()`. Imediatamente depois, `_async_finish_run` chama os mesmos métodos novamente nas linhas 1198-1199.
+- **Impacto**: Operações idempotentes; sem efeito funcional. Custo desprezível (um cancel+rearm de timer e um dispatcher_send extra).
+- **Classificação**: Ineficiência cosmética, não bug.
+
+#### 2. `_suppress_state_listener = True` redundante na linha 974
+- **Arquivo**: `scheduler.py:974`
+- **Cenário**: No caminho de abort do turn_on failure, `_suppress_state_listener` já está `True` (setado na linha 958). A reatribuição na linha 974 é redundante.
+- **Impacto**: Nenhum. O `finally` da linha 982 e o `finally` externo da linha 992 garantem cleanup correto.
+- **Classificação**: Redundância inofensiva.
+
+---
+
+## Falsos Positivos Percebidos
+
+| # | Descrição | Por que não é bug |
 |---|---|---|
-| `tests/test_next_run.py` | 18 | Pure: compute_next_run, find_next_run, DST, services |
-| `tests/test_schedules.py` | 10 | Pure: serialize, new, merge, id stability |
-| `tests/integration/test_init.py` | 7 | Entry setup/teardown, attribute contract, corrupt options |
-| `tests/integration/test_services.py` | 13 | Targeted services, device/area targeting, validation |
-| `tests/integration/test_config_flow.py` | 3 | Config + options flow, no-reload guarantee |
-| `tests/integration/test_recovery.py` | 9 | Restart recovery, defensive turn-off, double-log prevention |
-| `tests/integration/test_async_device.py` | 5 | Async device: stale echo, grace window, safety net |
-| `tests/integration/test_ph_gate.py` | 9 | pH gate R1: range, fail-safe, warnings |
-| `tests/integration/test_ph_gate_r2.py` | 8 | pH gate R2: independent reservoir, cross-reservoir warnings |
-| `tests/integration/test_history.py` | 8 | History logging, pH/EC snapshot, cap, downtime recovery |
-| `tests/integration/test_reservoir.py` | 8 | Reservoir tracking, deduction, refill, zero-pots fallback |
-| `tests/integration/test_frontend.py` | 4 | Static path, extra JS URL, missing-card resilience |
-| `tests/integration/test_review_fixes.py` | 7 | Regression pins for round-1 findings |
-| `tests/integration/test_review_fixes_2.py` | 9 | Regression pins for round-2 findings |
-| `frontend-src/tests/card.test.ts` | 50 | Card rendering, settings, badges, R2, history, error surfacing |
-| `frontend-src/tests/editor.test.ts` | 3 | Editor setConfig, ha-form rendering |
-| `frontend-src/tests/utils.test.ts` | 82 | All pure utils: format, sanitize, volume, history grouping |
+| 1 | `_async_register_services` chamado em `async_setup` E `async_setup_entry` | Guard `has_service` na linha 336 torna idempotente |
+| 2 | `setdefault("store", RuntimeStore(hass))` com entries concorrentes | `setdefault` é atômico sob GIL; uma única instância é criada |
+| 3 | `_stringAttr` retorna `undefined` para string vazia `""` | Callers fazem `?? ""` convertendo de volta; `""` significa "não configurado" |
+| 4 | `_async_finish_run` com `turn_off=False` no stop externo | O target já está confirmed-off; enviar turn_off seria desnecessário |
+| 5 | `_openAdd` seta `_formTime` para `"00:00"` (meia-noite) | Meia-noite é um horário válido; backend aceita |
+| 6 | `_callService` mira o sensor entity, não o switch/target | Backend resolve sensor → config_entry → scheduler via `_async_resolve_schedulers` |
+| 7 | Grace period = 0 quando `_active_duration` é None | `_active_duration` é sempre setado antes de grace ser consultado; o `else 0` é defensivo |
 
 ---
 
@@ -63,124 +109,53 @@
 
 | Suite | Comando | Resultado |
 |---|---|---|
-| Backend puro | `python -m pytest tests/test_next_run.py tests/test_schedules.py -q` | **28 passed** (0.02s) |
-| Backend HA | `python -m pytest tests -q` | **141 passed** (14.33s) |
-| Frontend typecheck | `npm run typecheck` | **OK** (zero errors) |
-| Frontend test | `npm run test` | **135 passed** (3 test files, 735ms) |
-| Frontend build | `npm run build` | **OK** (rollup, 823ms) |
+| Backend puro | `python -m pytest tests/test_next_run.py tests/test_schedules.py -q` | **35 passed** (0.03s) |
+| Backend HA | `python -m pytest tests -q` | **164 passed** (14.64s) |
+| Frontend typecheck | `npm run typecheck` | **OK** (tsc --noEmit sem erros) |
+| Frontend testes | `npm run test` | **153 passed** (3 test files, 792ms) |
+| Frontend build | `npm run build` | **OK** (rollup criou irrigation-schedule-card.js em 842ms) |
 
-**Total: 304 testes, todos passando.**
-
----
-
-## Verificação dos Achados da Rodada Anterior
-
-### (1) `SERVICE_REFILL_RESERVOIR` ausente no unregister
-- **Status**: ✅ **CORRIGIDO**
-- **Evidência**: `__init__.py:457` — `SERVICE_REFILL_RESERVOIR` está presente na tupla de `_async_unregister_services`. O teste `test_unload_removes_entities_and_services_only_with_last_entry` (test_init.py:122) valida que todos os 8 serviços (incluindo refill_reservoir) são removidos quando o último entry é descarregado.
-
-### (2) Downtime recovery registrando/deduzindo sem evidência de atuação
-- **Status**: ✅ **CORRIGIDO**
-- **Evidência**: `scheduler.py:1672` — A condição `run_state.get("actuated") and not run_state.get("history_logged")` exige EVIDÊNCIA persistida de atuação antes de logar/deduzir. O teste `test_downtime_recovery_does_not_log_run_with_no_actuation_evidence` (test_recovery.py:627) valida que um store record sem `actuated` NÃO gera phantom history entry nem dedução de reservatório.
+**Total: 352 testes, 0 falhas.**
 
 ---
 
-## Achados por Severidade
+## Análise de Segurança e Robustez
 
-### 🔴 CRÍTICO — Nenhum
+### Pontos fortes verificados
+- **Run generation token** (`_run_id`): previne re-entrância e callbacks stale em todo o lifecycle
+- **pH gate fail-safe**: sensor ausente/indisponível/inválido/NaN bloqueia a rega (nunca rega às cegas)
+- **Store lock**: `asyncio.Lock` único protege read-modify-write de todas as zonas concorrentes
+- **`async_update_entry` atômico**: previne race entre `_async_store_mark_actuated` e `_async_store_mark_history_logged`
+- **Restart recovery**: distingue run que realmente regou (`actuated=True`) de run que crashou antes do turn_on
+- **`history_logged`**: previne double-logging e double-deduction no recovery
+- **DST policy**: spring-forward gap skip + fall-back fold=0 documentados e testados
+- **Malformed days**: degrade gracefully (TypeError-free) via `isinstance(days, (list, tuple))`
+- **Frontend entity contract**: card valida `switch_entity_id`/`binary_sensor_entity_id` antes de renderizar
+- **Backend error surfacing**: dialog/settings mantêm painel aberto e mostram erro do backend
+- **Editor `config-changed`**: corrigido e coberto por teste de regressão
 
-### 🟠 ALTA — Nenhum
-
-### 🟡 MÉDIA — Nenhum
-
-### 🔵 BAIXA
-
-#### B1. `_async_registry_updated` aceita action "update" desnecessariamente
-- **Arquivo**: `sensor.py:123`
-- **Cenário**: O callback `_async_registry_updated` filtra `action == "remove"` mas aceita tanto "create" quanto "update". Um evento "update" de uma entidade do mesmo entry dispara uma re-resolução desnecessária (os sibling entity_ids já foram resolvidos e cacheados; `_entities_resolved` é True e o método retorna imediatamente na linha 146-147).
-- **Impacto**: Zero impacto funcional. Custo de uma chamada extra ao entity registry por update event, imediatamente short-circuitada. Puramente cosmético.
-- **Sugestão**: Adicionar `if event.data.get("action") not in ("create", "update"): return` ou simplesmente filtrar apenas "create" se a re-resolução só faz sentido para novas entidades. Não é urgente.
-
-#### B2. `_async_store_mark_actuated` e `_async_store_mark_history_logged` fazem load+save separados
-- **Arquivo**: `scheduler.py:1192-1215`
-- **Cenário**: Cada método faz `async_load()` + `async_save_entry()` sob o lock do RuntimeStore (duas operações I/O completas). Em teoria, um único ciclo load-modify-save seria mais eficiente.
-- **Impacto**: Performance mínima. O lock serializa corretamente e as operações são raras (uma vez por run). Em um cenário de múltiplas zonas finalizando simultaneamente, o overhead é de milissegundos.
-- **Sugestão**: Poderia ser unificado em um único `async_update_entry_fields(entry_id, **fields)` no RuntimeStore. Não é urgente.
-
-### ⚪ INFORMACIONAL
-
-#### I1. `_check_ph_range` usa `math.isfinite()` que cobre NaN e Inf simultaneamente
-- **Arquivo**: `scheduler.py:1470`
-- **Nota**: Correto por design. `float("nan")`, `float("inf")` e `float("-inf")` são todos rejeitados. Testado em `test_scheduled_run_skipped_when_ph_sensor_unusable` com parametrização incluindo "nan", "NaN", "-nan", "inf", "-inf".
-
-#### I2. `_async_abort_run` não chama `_async_log_history`
-- **Arquivo**: `scheduler.py:1287-1321`
-- **Nota**: Correto por design. Um run abortado nunca entregou água; logá-lo como "completed" seria um phantom entry. O gate `history_actuated` em `_async_finish_run` e a ausência de logging em `_async_abort_run` são consistentes.
-
-#### I3. `_async_recover_state` (resume path) não restaura `_active_actuated` do store
-- **Arquivo**: `scheduler.py:1728-1784`
-- **Nota**: Correto por design. Na linha 1778, se o target está actuated no momento do resume, `_active_actuated = True` é setado explicitamente. Se não está, o run é abortado com `log_history=False`. O campo `actuated` no store só é consultado no path downtime-expired (linha 1672).
-
-#### I4. Frontend `_stringAttr` retorna `undefined` para string vazia
-- **Arquivo**: `card.ts:1255-1261`
-- **Nota**: Correto por design. `typeof value === "string" && value` rejeita strings vazias, retornando `undefined`. Callers usam `?? ""` para o fallback apropriado. Consistente com o backend onde `""` significa "não configurado".
-
-#### I5. `confirmed_off_states` não é exportado em `__init__.py`
-- **Arquivo**: `next_run.py:186-198`
-- **Nota**: `confirmed_off_states` é importado diretamente por `scheduler.py` via `from .next_run import confirmed_off_states`. Não precisa estar no `__init__.py` pois não é consumido externamente.
+### Cobertura de testes adversariais
+- Malformed days (string, int, None, dict, float) → degrade gracefully
+- DST spring-forward/fall-back
+- Schedule id immutability through create→update
+- Backend error propagation to frontend (dialog stays open)
+- Entity contract validation (foreign sensor rejected)
+- pH gate cross-field validation (min > max blocked)
+- R2 independent reservoir fields
+- Reservoir volume/estimate/refill UI
 
 ---
 
-## Falsos Positivos Percebidos
+## Sugestões (não bloqueantes)
 
-Durante a revisão, os seguintes padrões poderiam parecer problemas à primeira vista, mas são corretos após análise detalhada:
+1. **Considerar extrair a constante `grace` para um método helper** — a expressão `min(ACTUATION_GRACE, self._active_duration) if self._active_duration is not None else 0` aparece em dois lugares (scheduler.py:1005 e 1614-1618). Um helper `_current_grace()` eliminaria a duplicação.
 
-1. **`_suppress_state_listener` setado duas vezes no abort path** (`scheduler.py:961`): Parece redundante com a linha 945, mas é necessário: o `finally` da linha 972-973 limpa a flag do primeiro set, e o segundo set (linha 961) protege o defensive turn_off que ocorre DENTRO do except block.
-
-2. **`_run_id` incrementado tanto no start quanto no finish** (`scheduler.py:877, 1043`): Parece excessivo, mas é essencial: o token de geração deve invalidar callbacks de AMBAS as direções — um stale finish não pode afetar um novo start, e um stale start não pode afetar um finish em andamento.
-
-3. **Volume badge repetido em ambas as linhas R1/R2** (`card.ts:393-407`): Parece duplicação, mas é intencional — quando ambos os reservatórios são exibidos, o grid de 6 colunas precisa que cada linha tenha seus próprios badges de volume/estimate/refill para alinhamento visual correto.
-
-4. **`_async_finish_run` captura `history_actuated` ANTES de limpar o estado** (`scheduler.py:1069`): Parece que poderia ler stale data, mas é correto — a flag sticky `_active_actuated` é lida antes de ser resetada na linha 1081, e `_async_target_is_actuated()` é chamada antes do turn_off (que só acontece na linha 1083+).
-
-5. **`_async_target_state_changed` ignora eventos durante a grace window** (`scheduler.py:1562-1570`): Parece que poderia perder um stop legítimo, mas é correto — o deferred actuation check (que roda ao final da grace) é o árbitro definitivo da saúde do run durante essa janela.
-
----
-
-## Sugestões (Não Bloqueantes)
-
-1. **Consolidação de store operations**: Um método `async_patch_entry(entry_id, **fields)` no RuntimeStore que faça load-modify-save em uma única operação sob lock eliminaria a duplicação em `_async_store_mark_actuated` e `_async_store_mark_history_logged`.
-
-2. **TypeScript strict mode**: O `tsconfig.json` do frontend-src poderia habilitar `strict: true` para maior segurança de tipos. Atualmente o typecheck passa, mas strict mode capturaria potenciais null accesses em cenários não testados.
-
-3. **Tradução pt-BR do card**: O card hardcode strings em português (dayLabels, dialogs, errors). Se internacionalização for desejada no futuro, extrair para um dicionário locale-aware seria o caminho. Atualmente é consistente e documentado como decisão deliberada.
-
----
-
-## Comandos Executados
-
-```powershell
-# Backend puro (venv sem HA)
-& "$env:TEMP\opencode\irr-venv\Scripts\python.exe" -m pytest tests/test_next_run.py tests/test_schedules.py -q
-# Resultado: 28 passed in 0.02s
-
-# Backend HA (venv com pytest-homeassistant-custom-component)
-& "$env:TEMP\opencode\ha-venv\Scripts\python.exe" -m pytest tests -q
-# Resultado: 141 passed in 14.33s
-
-# Frontend
-cd frontend-src
-npm run typecheck   # OK (zero errors)
-npm run test        # 135 passed (3 test files, 735ms)
-npm run build       # OK (rollup, 823ms)
-```
+2. **Considerar log level `DEBUG` para o duplo dispatch** — se o duplo `_reschedule_next()`/`_async_dispatch_update()` via `_deduct_reservoir_volume` → options listener se tornar mensurável em perfis de uso intenso, um flag `_in_finish_run` poderia suprimir o dispatch redundante.
 
 ---
 
 ## Status Final
 
-# ✅ APROVADO
+### **APROVADO**
 
-O código está em excelente estado. Todos os 304 testes passam (28 puros + 141 integração HA + 135 frontend). Os dois achados da rodada anterior foram corrigidos e estão cobertos por testes de regressão específicos. Nenhum bug de severidade crítica, alta ou média foi identificado. Os dois achados de baixa severidade são cosméticos/performance mínima e não afetam a corretude do sistema.
-
-A arquitetura é robusta: o run lifecycle usa generation tokens para prevenir reentrância, o pH gate é fail-safe, o restart recovery exige evidência de atuação antes de logar, o reservoir tracking compartilha o mesmo gate do history logging, e o frontend valida o contrato de entidades antes de renderizar. A cobertura de testes é extensiva e inclui cenários adversariais (async devices, stale echoes, corrupt store, failed turn_off, double-log prevention).
+O achado da rodada anterior (editor visual `_valueChanged` lendo `ev.detail.name` em vez de `ev.detail.value`) foi **corrigido corretamente** e está coberto por teste de regressão. Nenhum achado crítico, alto ou médio foi identificado. O código apresenta defesa em profundidade consistente, com comentários explicando o racional de cada decisão de design. Todos os 352 testes passam.

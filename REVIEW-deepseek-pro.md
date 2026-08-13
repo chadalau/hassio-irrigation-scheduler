@@ -1,79 +1,57 @@
-# REVIEW-deepseek-pro.md — Revisão completa final (deepseek-v4-pro)
+# REVIEW-deepseek-pro.md — Auditoria (deepseek-v4-pro)
 
-**Revisor:** deepseek-v4-pro (DeepSeek API) · **Status: PRECISA DE ALTERAÇÃO**
+**Revisor:** deepseek-v4-pro (DeepSeek API) · **Status: APROVADO**
 
-Revisão completa final de `watergaia` (código encerrado pelo usuário). Não
-alterei código de produção nem testes. Números executados por mim.
+Auditoria do estado atual de `watergaia`. Não alterei código de produção nem
+testes. Números executados por mim.
 
 ## Testes executados
 
 | Suite | Resultado |
 |---|---|
-| Backend completo (HA 2026.2.3 + PHCC) | **141 passed** |
-| Backend puro | **28 passed** |
-| Frontend typecheck / vitest | **0 erros** / **135 passed** |
+| Backend completo (HA 2026.2.3 + PHCC) | **164 passed** |
+| Backend puro | **35 passed** |
+| Frontend typecheck / vitest | **0 erros** / **153 passed** |
 | `compileall custom_components` | **0 erros** |
 
-## Achados da rodada anterior — status
+## Achado da rodada anterior — corrigido
 
-| # | Achado | Veredito |
-|---|---|---|
-| 1 | `SERVICE_REFILL_RESERVOIR` ausente no unregister | ✅ **CORRIGIDO** — incluído em `_async_unregister_services` (`__init__.py:456`) e em `ALL_SERVICES` |
-| 2 | Downtime recovery registrando/deduzindo sem evidência de atuação | ✅ **CORRIGIDO** — gate `run_state.get("actuated")` + `not run_state.get("history_logged")` (`scheduler.py:1672`) |
+**Editor visual** (`frontend-src/src/editor.ts:71-85`): `_valueChanged` agora lê
+`ev.detail.value` (a config completa que o `ha-form` emite) em vez de
+`ev.detail.name`. O `config-changed` volta a disparar e as edições visuais são
+salvas. Confirmado no fonte e no teste de regressão (`editor.test.ts`).
 
-## Achado confirmado nesta rodada
+## Achados desta rodada (apenas BAIXO, sem risco físico)
 
-### MÉDIO — Editor visual do card não salva alterações (`config-changed` nunca dispara)
+1. **BAIXO** — `scheduler.py:1102-1170`: se uma rega nova começa exatamente
+   durante o backoff de 1 s do `turn_off`, o `return` abandona o registro do
+   histórico da rega que acabou (informacional; janela de 1-2 s).
 
-**Arquivo:** `frontend-src/src/editor.ts`, `_valueChanged` (63-77).
+2. **BAIXO** — `scheduler.py:1614-1622`: parada externa dentro do
+   `ACTUATION_GRACE` é ignorada pelo listener (correto para eco atrasado), mas
+   o run pode ser contabilizado com duração/volume completos se o alvo já tinha
+   atuado.
 
-O handler lê `ev.detail.name` e `ev.detail.value` como se o evento viesse de um
-seletor individual. Porém o `ha-form` do Home Assistant emite `value-changed`
-com `detail = { value: <objeto completo da config> }` (o `ha-form` já consolida
-os campos internos e reemite um único evento com todo o `_data`). Como
-`detail.name` é `undefined`, o guard `if (!name ...) return` encerra a função e
-o evento `config-changed` **nunca é despachado**.
+3. **BAIXO** — `scheduler.py:577-588`: detecção de desligamento externo só via
+   evento de mudança de estado, sem varredura no boot de alvo já atuado.
 
-Consequência: ao editar o card pelo editor visual, nenhuma alteração é salva
-(só funciona via YAML). O `setConfig` (41) está correto — é o handler de
-mudança que está errado. Não há teste cobrindo o dispatch de `config-changed`
-(`editor.test.ts` só verifica `setConfig` e a presença de `ha-form`).
+4. **INFO** — validação de pH no cliente mais fraca que no backend; comentário
+   ambíguo sobre a linha R2 no `card.ts`; asserção morta no `smoke.mjs`.
 
-**Sugestão:** tratar `ev.detail.value` como a config completa:
-```ts
-private _valueChanged(ev: CustomEvent): void {
-  const value = ev.detail?.value;
-  if (!value || !this._config) return;
-  this.dispatchEvent(new CustomEvent("config-changed", {
-    detail: { config: { ...this._config, ...(value as object) } },
-    bubbles: true, composed: true,
-  }));
-}
-```
-E adicionar teste que simule o evento do `ha-form` e asserção de
-`config-changed` com a config mesclada.
+## Pontos verificados como corretos
 
-## Baixos confirmados
-
-- `schedules` filtra `duration` corrompida mas não `days`; um `days` com
-  string/int/None chega a `find_next_run` e pode levantar `TypeError`
-  (`next_run.py` itera `weekday in schedule.get("days", [])`).
-- Registro antigo de histórico sem `ph_value` renderiza "· ? PH" no card.
-- `smoke.mjs` ainda tem checagem desatualizada de "day chips".
-
-## Falsos positivos / itens corretos
-
-- Núcleo de segurança (timer imediato, grace, `_run_id`, retry,
-  `confirmed_off_states`) — correto.
-- Gate de pH com `math.isfinite`; `_active_actuated`; normalização `as_utc` de
-  `started_at`/`finishes_at`; revert em falha de `async_save_entry` — corretos.
-- `refill_reservoir` / `_deduct_reservoir_volume` cobertos por `test_reservoir.py`.
-- Editor implementa `setConfig` (contrato do Lovelace) — correto.
+- Núcleo de segurança: timer imediato pós-`turn_on`, grace de atuação,
+  `_run_id`, retry com confirmação, `confirmed_off_states`, preservação do
+  store quando o off não é confirmado.
+- Gate de pH/EC com `math.isfinite`; `_active_actuated`; normalização `as_utc`
+  de `started_at`/`finishes_at`; revert em falha de `async_save_entry`.
+- `refill_reservoir` (com unregister correto) e `_deduct_reservoir_volume`
+  (dedução só após atuação confirmada).
+- Editor implementa `setConfig` e agora emite `config-changed` corretamente.
 
 ## Conclusão
 
-Os dois achados da rodada anterior estão corrigidos e testados. Resta um bug
-funcional real no editor visual (MÉDIO): o handler de `value-changed` usa a
-forma de evento errada, então edições visuais não são salvas. Não afeta a
-segurança física nem o backend, mas torna o editor visual inoperante. Os demais
-são baixos de robustez/cosmética. **PRECISA DE ALTERAÇÃO.**
+Todos os achados das rodadas anteriores foram corrigidos, incluindo o editor
+visual. Restam apenas itens de baixa prioridade (histórico/contagem em janelas
+de corrida muito estreitas e cosméticos), sem impacto na segurança da rega nem
+no backend. **APROVADO.**
