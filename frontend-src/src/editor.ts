@@ -60,13 +60,21 @@ export class IrrigationScheduleCardEditor extends LitElement {
   private _computeLabel = (schema: FormSchema): string =>
     LABELS[schema.name] ?? schema.name;
 
+  /**
+   * ha-form's own `value-changed` event carries the ENTIRE form data as
+   * `detail.value` (it consolidates every field's change into one event
+   * before re-firing, not a per-field `{ name, value }` pair) -- reading
+   * `detail.name` here always returned `undefined`, so `config-changed` was
+   * never dispatched and the visual editor silently saved nothing (only
+   * editing the card's YAML worked).
+   */
   private _valueChanged(ev: CustomEvent): void {
-    const detail = ev.detail as { name?: string; value?: unknown } | undefined;
-    const name = detail?.name;
-    if (!name || !this._config) {
+    const value = (ev.detail as { value?: Record<string, unknown> } | undefined)
+      ?.value;
+    if (!value || !this._config) {
       return;
     }
-    const config = { ...this._config, [name]: detail.value } as CardConfig;
+    const config = { ...this._config, ...value } as CardConfig;
     this.dispatchEvent(
       new CustomEvent("config-changed", {
         detail: { config },

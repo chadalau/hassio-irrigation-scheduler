@@ -637,6 +637,53 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
     expect(card.shadowRoot?.querySelectorAll(".ec-badge")).toHaveLength(1);
   });
 
+  it("shows the reservoir row (volume/estimate/refill) even without any pH/EC sensor configured", async () => {
+    const card = await mountCard(
+      {
+        "sensor.jardim_next_run": baseSensor({
+          reservoir_volume_l: 1000,
+          flow_rate_lph: 8,
+        }),
+      },
+      [],
+    );
+    expect(card.shadowRoot?.querySelector(".volume-badge")).not.toBeNull();
+    expect(card.shadowRoot?.querySelector(".refill-button")).not.toBeNull();
+  });
+
+  it("does not show the R1/R2 label pill when only one reservoir is shown", async () => {
+    const card = await mountCard(
+      {
+        "sensor.jardim_next_run": baseSensor({
+          ph_entity_id: "sensor.r1_ph",
+          reservoir_volume_l: 1000,
+        }),
+      },
+      [],
+    );
+    expect(card.shadowRoot?.querySelector(".reservoir-label")).toBeNull();
+    // The row still renders (pH badge + volume badge), just without the
+    // disambiguation pill.
+    expect(card.shadowRoot?.querySelector(".ph-badge")).not.toBeNull();
+    expect(card.shadowRoot?.querySelector(".volume-badge")).not.toBeNull();
+  });
+
+  it("shows the R1/R2 label pill only when both reservoirs are shown", async () => {
+    const card = await mountCard(
+      {
+        "sensor.jardim_next_run": baseSensor({
+          ph_entity_id: "sensor.r1_ph",
+          ph_entity_id_2: "sensor.r2_ph",
+        }),
+      },
+      [],
+    );
+    const labels = card.shadowRoot?.querySelectorAll(".reservoir-label");
+    expect(labels).toHaveLength(2);
+    expect(labels?.[0].textContent?.trim()).toBe("R1");
+    expect(labels?.[1].textContent?.trim()).toBe("R2");
+  });
+
   it("_saveSettings sends R2 fields only when their inputs were touched", async () => {
     const calls: ServiceCallRecord[] = [];
     const card = await mountCard(

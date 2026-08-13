@@ -6,7 +6,7 @@ var IrrigationScheduleCard=function(t){"use strict";function e(t,e,i,s){var r,n=
         .computeLabel=${this._computeLabel}
         @value-changed=${this._valueChanged}
       ></ha-form>
-    `:B``}_valueChanged(t){const e=t.detail,i=e?.name;if(!i||!this._config)return;const s={...this._config,[i]:e.value};this.dispatchEvent(new CustomEvent("config-changed",{detail:{config:s},bubbles:!0,composed:!0}))}}e([ht({attribute:!1})],yt.prototype,"hass",void 0),e([ut()],yt.prototype,"_config",void 0);const bt=((t,...e)=>{const i=1===t.length?t[0]:e.reduce((e,i,s)=>e+(t=>{if(!0===t._$cssResult$)return t.cssText;if("number"==typeof t)return t;throw Error("Value passed to 'css' function must be a 'css' function result: "+t+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(i)+t[s+1],t[0]);return new o(i,t,r)})`
+    `:B``}_valueChanged(t){const e=t.detail?.value;if(!e||!this._config)return;const i={...this._config,...e};this.dispatchEvent(new CustomEvent("config-changed",{detail:{config:i},bubbles:!0,composed:!0}))}}e([ht({attribute:!1})],yt.prototype,"hass",void 0),e([ut()],yt.prototype,"_config",void 0);const bt=((t,...e)=>{const i=1===t.length?t[0]:e.reduce((e,i,s)=>e+(t=>{if(!0===t._$cssResult$)return t.cssText;if("number"==typeof t)return t;throw Error("Value passed to 'css' function must be a 'css' function result: "+t+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(i)+t[s+1],t[0]);return new o(i,t,r)})`
   ha-card {
     overflow: hidden;
   }
@@ -727,7 +727,7 @@ var IrrigationScheduleCard=function(t){"use strict";function e(t,e,i,s){var r,n=
             >
               <ha-icon icon="mdi:water-plus"></ha-icon>
             </button>
-          `:"",j=Boolean(h||m),U=Boolean(_||b);return B`
+          `:"",j=Boolean(h||m||c>0),U=Boolean(_||b);return B`
       <ha-card class=${e?"compact":""}>
         <div class="header">
           <div class="header-top">
@@ -753,8 +753,8 @@ var IrrigationScheduleCard=function(t){"use strict";function e(t,e,i,s){var r,n=
           </div>
           ${j||U?B`
                 <div class="header-badges">
-                  ${j?this._renderReservoirRow("R1",1,h,g,m,R,F,I):""}
-                  ${U?this._renderReservoirRow("R2",2,_,y,b,R,F,I):""}
+                  ${j?this._renderReservoirRow(U?"R1":"",1,h,g,m,R,F,I):""}
+                  ${U?this._renderReservoirRow(j?"R2":"",2,_,y,b,R,F,I):""}
                 </div>
               `:""}
         </div>
@@ -848,7 +848,7 @@ var IrrigationScheduleCard=function(t){"use strict";function e(t,e,i,s){var r,n=
           >
             ${this._sensorBadgeText(r,"EC ?",(t,e)=>`EC ${Nt(t,e)}`)}
           </button>
-        `:B`<span></span>`;return[B`<span class="reservoir-label">${t}</span>`,l,c,n,o,a]}_renderScheduleRow(t,e,i,s){const r=Ct(e,t.duration),n=Mt(e,t.duration,i);return B`
+        `:B`<span></span>`;return[t?B`<span class="reservoir-label">${t}</span>`:B`<span></span>`,l,c,n,o,a]}_renderScheduleRow(t,e,i,s){const r=Ct(e,t.duration),n=Mt(e,t.duration,i);return B`
       <div class="schedule-row">
         <ha-switch
           ?checked=${t.enabled}

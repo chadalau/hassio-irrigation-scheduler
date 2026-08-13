@@ -121,7 +121,14 @@ def find_next_run(
         for schedule in schedules:
             if not schedule.get(_KEY_ENABLED, True):
                 continue
-            if weekday not in schedule.get(_KEY_DAYS, []):
+            # A malformed "days" (not a list/tuple -- e.g. a hand-edited
+            # store with a string, int or None) must degrade gracefully
+            # like an invalid "time" does below, not raise: `weekday not in
+            # <non-container>` throws TypeError, which would crash this
+            # whole function (and, via _reschedule_next, the zone's
+            # async_setup_entry) for a single corrupted schedule item.
+            days = schedule.get(_KEY_DAYS, [])
+            if not isinstance(days, (list, tuple)) or weekday not in days:
                 continue
             schedule_time = _parse_schedule_time(schedule.get(_KEY_TIME))
             if schedule_time is None:

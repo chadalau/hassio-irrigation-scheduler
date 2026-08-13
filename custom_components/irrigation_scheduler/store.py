@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
-from typing import Any
+from typing import Any, Callable
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
@@ -99,6 +99,33 @@ class RuntimeStore:
         async with self._lock:
             data = await self._async_load_unlocked()
             data["entries"][entry_id] = run_state
+            await self._store.async_save(data)
+
+    async def async_update_entry(
+        self,
+        entry_id: str,
+        mutator: Callable[[dict[str, Any] | None], dict[str, Any] | None],
+    ) -> None:
+        """Atomically read-modify-write a single entry under ONE lock hold.
+
+        ``mutator`` receives the entry's CURRENT run_state (``None`` if it
+        does not exist) and returns the new run_state to persist, or
+        ``None`` for a no-op. Unlike calling ``async_load()`` followed by a
+        separate ``async_save_entry()`` -- which each acquire/release the
+        lock independently -- the whole load->mutate->save cycle here never
+        releases the lock in between, so a second concurrent caller for the
+        SAME entry_id can never silently discard this write with a stale
+        snapshot from its own earlier, independent load (confirmed
+        reproducible: two callers each doing their own load+save clobbered
+        one another's field-level change to the same entry).
+        """
+        async with self._lock:
+            data = await self._async_load_unlocked()
+            current = data["entries"].get(entry_id)
+            new_state = mutator(current)
+            if new_state is None:
+                return
+            data["entries"][entry_id] = new_state
             await self._store.async_save(data)
 
     async def async_remove_entry(self, entry_id: str) -> None:

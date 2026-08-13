@@ -87,6 +87,32 @@ def test_empty_schedules_returns_none() -> None:
     assert compute_next_run([], _dt(2024, 5, 6, 0, 0)) is None
 
 
+@pytest.mark.parametrize("bad_days", ["0,1", 0, None, "all", 3.5, {}])
+def test_malformed_days_degrades_gracefully_instead_of_raising(bad_days) -> None:
+    """REGRESSION: a hand-edited/corrupted store could have "days" as
+    anything (string, int, None, ...), not just a valid list. Before this
+    fix, ``weekday not in schedule.get("days", [])`` raised TypeError for
+    every non-container value, crashing find_next_run (and, via
+    _reschedule_next, the whole zone's async_setup_entry) for a single
+    corrupted schedule item -- contradicting the "invalid time/days degrade
+    gracefully" contract this module documents."""
+    schedules = [
+        {"time": "06:00:00", "days": bad_days, "duration": 900, "enabled": True}
+    ]
+    assert compute_next_run(schedules, _dt(2024, 5, 6, 0, 0)) is None
+    assert find_next_run(schedules, _dt(2024, 5, 6, 0, 0)) == (None, None)
+
+
+def test_malformed_days_on_one_schedule_does_not_block_a_valid_sibling() -> None:
+    schedules = [
+        {"time": "06:00:00", "days": "bad", "duration": 900, "enabled": True},
+        {"time": "07:00:00", "days": [0], "duration": 900, "enabled": True},
+    ]
+    now = _dt(2024, 5, 6, 0, 0)  # Monday
+    expected = _dt(2024, 5, 6, 7, 0)
+    assert compute_next_run(schedules, now) == expected
+
+
 def test_same_weekday_after_time_rolls_to_next_week() -> None:
     """If today's slot already passed, roll forward a full week."""
     schedules = [{"time": "06:00:00", "days": [0], "duration": 900, "enabled": True}]

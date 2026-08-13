@@ -290,7 +290,12 @@ alvo realmente atuou -- a recuperacao pos-restart (que nao tem estado em
 memoria para consultar) nao teria como distinguir uma rega que genuinamente
 regou (e travou) de uma cujo `turn_on` nunca chegou a fazer efeito antes do
 crash. No-op se o registro ja sumiu do Store (rega ja terminou normalmente)
-ou ja esta marcado.
+ou ja esta marcado. Usa `store.async_update_entry` (load-muta-save atomico
+sob um unico lock) em vez de `async_load()` + `async_save_entry()` separados
+-- essa segunda forma tinha uma race real com `_async_store_mark_history_
+logged` para o MESMO registro (cada uma carregava seu proprio snapshot
+desatualizado e a que salvasse por ultimo apagava o campo da outra;
+reproduzido com uma interleaving forcada antes do fix).
 
 #### `_async_store_mark_history_logged()`
 
@@ -301,7 +306,9 @@ nao teria como saber que aquele registro sobrevivente JA foi logado e
 descontado do reservatorio, e o logaria de novo no proximo restart --
 duplicando a rega no historico e a deducao de volume para uma UNICA rega
 fisica (achado real, corrigido; reproduzido empiricamente antes do fix:
-`turn_off` falhando 3x -> log imediato -> restart -> log duplicado).
+`turn_off` falhando 3x -> log imediato -> restart -> log duplicado). Tambem
+usa `store.async_update_entry` pelo mesmo motivo de `_async_store_mark_
+actuated` (ver acima).
 
 #### `_async_abort_run()`
 
@@ -471,7 +478,16 @@ Modulo puro, sem imports do Home Assistant.
 #### `find_next_run(schedules, now, enabled)`
 
 Retorna `(datetime, schedule)` do proximo horario valido. Trata virada de
-semana, horarios desabilitados e DST.
+semana, horarios desabilitados e DST. Um `days` malformado (nao lista/tupla
+-- string, int, `None`, etc., so possivel com um Store/options editado a
+mao) e tratado como "nenhum dia configurado" (schedule pulado) em vez de
+lancar `TypeError`: antes desse fix, `weekday not in schedule.get("days",
+[])` estourava para qualquer `days` nao-container, o que derrubava esta
+funcao inteira e, via `_reschedule_next`, o `async_setup_entry` da zona
+inteira por causa de UM horario corrompido -- contradizendo o proprio
+contrato documentado aqui de que `time`/`days` invalidos degradam
+graciosamente (mesmo tratamento que `_parse_schedule_time` ja da a um
+`time` invalido).
 
 #### `compute_next_run(schedules, now, enabled)`
 
@@ -531,7 +547,31 @@ Carrega o estado runtime completo.
 
 #### `async_save_entry(entry_id, run_state)`
 
-Salva o estado de uma rega usando lock para evitar conflito entre zonas.
+Salva (sobrescreve) o estado de uma rega usando lock para evitar conflito
+entre zonas. **Nao e seguro para read-modify-write**: ler o estado atual com
+`async_load()` e depois chamar `async_save_entry` com uma copia modificada e
+DUAS operacoes com lock independentes (adquire/libera cada uma) -- entre elas
+outro chamador pode fazer o mesmo ciclo para a MESMA `entry_id` e ter sua
+mudanca apagada por um `save_entry` posterior que carrega um snapshot antigo.
+Para mutar um campo de um registro existente, usar `async_update_entry` (ver
+abaixo). `async_save_entry` continua correto para uma escrita "cega"
+(sobrescrita completa e intencional, ex.: `_async_start_run` gravando o
+payload inicial de uma rega nova).
+
+#### `async_update_entry(entry_id, mutator)`
+
+Le, muta e grava UMA `entry_id` atomicamente, com o lock preso do inicio ao
+fim do ciclo (nunca liberado entre o load e o save). `mutator` recebe o
+`run_state` atual (`None` se nao existir) e retorna o novo valor a persistir,
+ou `None` para no-op. Existe para corrigir uma race real: antes desta funcao,
+`IrrigationScheduler._async_store_mark_actuated`/`_async_store_mark_history_
+logged` faziam `async_load()` + `async_save_entry()` separados -- reproduzido
+com uma interleaving forcada, duas chamadas concorrentes para o MESMO
+registro (uma marcando `actuated`, outra `history_logged`) faziam a que
+salvasse por ULTIMO apagar o campo que a outra ja tinha persistido, porque
+cada uma carregava seu proprio snapshot ANTES da gravacao da outra. Usar
+sempre que a operacao for "mudar um campo de um registro que ja pode
+existir", nunca uma sobrescrita cega completa.
 
 #### `async_remove_entry(entry_id)`
 
@@ -653,8 +693,8 @@ Arquivo fonte: `frontend-src/src/card.ts`.
 | `setConfig` | Valida e salva a configuracao YAML do card. |
 | `getCardSize` | Informa o tamanho estimado para o Lovelace. |
 | `render` | Renderiza erro de configuracao ou o card da zona. Alem do prefixo `sensor.`, exige que a entidade tenha os atributos `switch_entity_id`/`binary_sensor_entity_id` (contrato exclusivo do sensor `next_run` desta integracao) antes de renderizar -- qualquer outro sensor HA cai no erro de configuracao em vez de tentar renderizar com atributos ausentes. |
-| `_renderCard` | Renderiza cabecalho em duas linhas: titulo + status/toggle/engrenagem na primeira; abaixo, uma linha por reservatorio configurado (`.header-badges`, grade de 6 colunas fixas -- rotulo/pH/EC/volume/estimativa/refil -- para R1 e R2 alinharem coluna a coluna). Depois: proximo horario, ultima rega, separador, lista de horarios (sempre em ordem crescente via `sortSchedulesByTime`, independente da ordem de criacao), botoes de acao (`.action-circle`: dois circulos preenchidos, "+" abre o dialogo de adicionar horario e o play chama `water_now`) e settings. |
-| `_renderReservoirRow` | Renderiza uma linha de badges (rotulo "R1"/"R2" + pH + EC + volume + estimativa + botao de refil) como um ARRAY de siblings (nao um template combinado) -- cada badge precisa ser filho direto de `.header-badges` para a grade CSS alinhar as colunas corretamente entre as duas linhas. O texto do badge de pH/EC NAO leva mais o sufixo " R2": o rotulo da linha ja desambigua. O badge de volume (`reservoir_remaining_l`/`reservoir_volume_l`), a estimativa e o botao de refil sao os MESMOS elementos repetidos nas duas linhas (a zona so tem um reservatorio configurado no sentido de rastreamento -- so a leitura de pH/EC e por reservatorio fisico; ver "Opcao A" na decisao de design). |
+| `_renderCard` | Renderiza cabecalho em duas linhas: titulo + status/toggle/engrenagem na primeira; abaixo, uma linha por reservatorio "em uso" (`.header-badges`, grade de 6 colunas fixas -- rotulo/pH/EC/volume/estimativa/refil -- para R1 e R2 alinharem coluna a coluna). A linha R1 conta como em uso com pH OU EC configurados **OU** `reservoir_volume_l > 0` -- uma zona sem nenhum sensor de pH/EC mas com volume+vazao configurados ainda precisa mostrar os controles de volume/estimativa/refil. A linha R2 so aparece com pH2/EC2 configurados (nao herda o fallback de volume: os controles de volume ja aparecem uma vez na linha R1). Depois: proximo horario, ultima rega, separador, lista de horarios (sempre em ordem crescente via `sortSchedulesByTime`, independente da ordem de criacao), botoes de acao (`.action-circle`: dois circulos preenchidos, "+" abre o dialogo de adicionar horario e o play chama `water_now`) e settings. |
+| `_renderReservoirRow` | Renderiza uma linha de badges (rotulo opcional "R1"/"R2" + pH + EC + volume + estimativa + botao de refil) como um ARRAY de siblings (nao um template combinado) -- cada badge precisa ser filho direto de `.header-badges` para a grade CSS alinhar as colunas corretamente entre as duas linhas. O rotulo "R1"/"R2" SO e passado quando as DUAS linhas estao visiveis (nada a desambiguar com um reservatorio so); caso contrario o chamador passa `""` e um placeholder invisivel ocupa a celula, mantendo as 6 colunas fixas nas duas linhas. O texto do badge de pH/EC NAO leva mais o sufixo " R2": o rotulo da linha ja desambigua quando presente. O badge de volume (`reservoir_remaining_l`/`reservoir_volume_l`), a estimativa e o botao de refil sao os MESMOS elementos repetidos nas duas linhas quando ambas existem (a zona so tem um reservatorio configurado no sentido de rastreamento -- so a leitura de pH/EC e por reservatorio fisico; ver "Opcao A" na decisao de design). |
 | `_renderScheduleRow` | Renderiza um horario em duas linhas: hora + indicador fixo de 7 dias (`dayInitials`, cinza quando o dia nao esta marcado) + badge `!` (aviso em `schedule_warnings`) na linha de cima; duracao, volume total e ml por vaso na linha de baixo. O switch fica na coluna mais a esquerda da linha (fora do bloco de info), editar/excluir na coluna mais a direita. |
 | `_renderDialog` | Renderiza o formulario de adicionar/editar horario. A duracao usa uma unica caixa hh:mm:ss (2 digitos cada, sem as setas de incremento do input number) em vez de campos separados de min/seg. Quando a vazao por vaso esta configurada, mostra tambem "Volume por vaso (ml)" calculado a partir da duracao. |
 | `_renderSettings` | Renderiza duracao padrao, vazao por vaso, vasos, reservatorio, o gate de pH R1 (sensor + faixa min/max), o sensor de EC R1 (so exibicao) e os mesmos 3 campos para o reservatorio R2 independente. |
@@ -700,7 +740,14 @@ Traduz os nomes dos campos do editor.
 
 #### `_valueChanged(event)`
 
-Emite `config-changed` com a configuracao atualizada.
+Emite `config-changed` com a configuracao atualizada. Le `event.detail.value`
+como a configuracao COMPLETA do formulario (o `ha-form` do HA consolida
+TODOS os campos em um unico evento `value-changed`, nunca emite um par
+`{name, value}` por campo individual) e faz merge em `_config`. Antes desse
+fix o handler lia `event.detail.name` -- sempre `undefined` no formato real
+do `ha-form` -- entao `config-changed` nunca era despachado e o editor
+visual nao salvava NENHUMA alteracao (so editar via YAML funcionava).
+No-op se `detail.value` estiver ausente.
 
 ## Configuracoes armazenadas
 

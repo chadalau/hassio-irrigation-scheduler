@@ -62,4 +62,82 @@ describe("IrrigationScheduleCardEditor", () => {
 
     expect(editor.shadowRoot?.querySelector("ha-form")).toBeNull();
   });
+
+  it("REGRESSION: dispatches config-changed when ha-form's value-changed fires with the real {value: <full data>} shape", async () => {
+    const editor = makeEditor();
+    document.body.appendChild(editor);
+    attached.push(editor);
+
+    editor.setConfig({
+      type: "custom:irrigation-schedule-card",
+      entity: "sensor.jardim_next_run",
+      compact: false,
+    });
+    editor.hass = {
+      language: "pt-BR",
+      states: {},
+      callService: async () => {},
+    } as HomeAssistant;
+    await editor.updateComplete;
+
+    const configChanged = new Promise<CustomEvent>((resolve) => {
+      editor.addEventListener("config-changed", (ev) => resolve(ev as CustomEvent), {
+        once: true,
+      });
+    });
+
+    const form = editor.shadowRoot?.querySelector("ha-form");
+    expect(form).not.toBeNull();
+    // ha-form consolidates every field into ONE event: detail = { value:
+    // <entire form data> }, never a per-field { name, value } pair.
+    form?.dispatchEvent(
+      new CustomEvent("value-changed", {
+        detail: {
+          value: {
+            entity: "sensor.jardim_next_run",
+            compact: true,
+          },
+        },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+
+    const event = await configChanged;
+    expect(event.detail.config).toEqual({
+      type: "custom:irrigation-schedule-card",
+      entity: "sensor.jardim_next_run",
+      compact: true,
+    });
+  });
+
+  it("does not dispatch config-changed when value-changed carries no detail.value", async () => {
+    const editor = makeEditor();
+    document.body.appendChild(editor);
+    attached.push(editor);
+
+    editor.setConfig({
+      type: "custom:irrigation-schedule-card",
+      entity: "sensor.jardim_next_run",
+    });
+    editor.hass = {
+      language: "pt-BR",
+      states: {},
+      callService: async () => {},
+    } as HomeAssistant;
+    await editor.updateComplete;
+
+    let fired = false;
+    editor.addEventListener("config-changed", () => {
+      fired = true;
+    });
+
+    const form = editor.shadowRoot?.querySelector("ha-form");
+    form?.dispatchEvent(
+      new CustomEvent("value-changed", { detail: {}, bubbles: true, composed: true }),
+    );
+    await Promise.resolve();
+
+    expect(fired).toBe(false);
+  });
 });

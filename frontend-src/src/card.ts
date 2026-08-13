@@ -345,7 +345,13 @@ export class IrrigationScheduleCard extends LitElement {
             </button>
           `
         : "";
-    const showRow1 = Boolean(phEntityId || ecEntityId);
+    // R1's row also carries the (shared) volume/estimate/refill badges, so
+    // it must render even without any pH/EC sensor configured -- otherwise
+    // a zone with only reservoir_volume_l + flow_rate_lph set would show no
+    // reservoir controls at all. R2's row is purely about its own pH/EC:
+    // no reservoir fallback there, since the volume controls already show
+    // once on R1's row.
+    const showRow1 = Boolean(phEntityId || ecEntityId || reservoirVolume > 0);
     const showRow2 = Boolean(phEntityId2 || ecEntityId2);
     return html`
       <ha-card class=${compact ? "compact" : ""}>
@@ -378,7 +384,7 @@ export class IrrigationScheduleCard extends LitElement {
                 <div class="header-badges">
                   ${showRow1
                     ? this._renderReservoirRow(
-                        "R1",
+                        showRow2 ? "R1" : "",
                         1,
                         phEntityId,
                         phStatusClass,
@@ -390,7 +396,7 @@ export class IrrigationScheduleCard extends LitElement {
                     : ""}
                   ${showRow2
                     ? this._renderReservoirRow(
-                        "R2",
+                        showRow1 ? "R2" : "",
                         2,
                         phEntityId2,
                         phStatusClass2,
@@ -512,10 +518,14 @@ export class IrrigationScheduleCard extends LitElement {
   }
 
   /**
-   * One row of pH/EC/volume badges for a reservoir ("R1" or "R2"), as an
-   * ARRAY of siblings rather than one combined template: each element must
-   * land as its own direct child of `.header-badges` for the CSS grid's
+   * One row of pH/EC/volume badges for a reservoir, as an ARRAY of
+   * siblings rather than one combined template: each element must land as
+   * its own direct child of `.header-badges` for the CSS grid's
    * `grid-template-columns` to size (and align) each column correctly.
+   * ``label`` ("R1"/"R2") is only passed when BOTH reservoirs are shown --
+   * with a single reservoir there is nothing to disambiguate, so callers
+   * pass "" and this renders an empty placeholder in that grid cell instead
+   * (keeps the row at a fixed 6 columns either way).
    */
   private _renderReservoirRow(
     label: string,
@@ -557,8 +567,11 @@ export class IrrigationScheduleCard extends LitElement {
           </button>
         `
       : html`<span></span>`;
+    const labelBadge = label
+      ? html`<span class="reservoir-label">${label}</span>`
+      : html`<span></span>`;
     return [
-      html`<span class="reservoir-label">${label}</span>`,
+      labelBadge,
       phBadge,
       ecBadge,
       volumeBadge,

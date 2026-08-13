@@ -1188,13 +1188,24 @@ class IrrigationScheduler:
         run that genuinely delivered water apart from one whose ``turn_on``
         never took effect before the crash. No-op if the store entry is
         already gone (run already finished normally) or already marked.
+
+        Goes through ``store.async_update_entry`` (one atomic load-mutate-
+        save under a single lock hold) rather than a separate load() +
+        save_entry() -- the latter raced against
+        ``_async_store_mark_history_logged`` for the SAME entry_id: each
+        held its own stale local snapshot from an earlier, independently
+        locked load(), so whichever saved last silently clobbered the
+        other's field (reproduced with a forced interleaving before this
+        fix).
         """
-        data = await self.store.async_load()
-        run_state = data["entries"].get(self.entry.entry_id)
-        if run_state is None or run_state.get("actuated"):
-            return
-        run_state["actuated"] = True
-        await self.store.async_save_entry(self.entry.entry_id, run_state)
+
+        def _mutate(run_state: dict[str, Any] | None) -> dict[str, Any] | None:
+            if run_state is None or run_state.get("actuated"):
+                return None
+            run_state["actuated"] = True
+            return run_state
+
+        await self.store.async_update_entry(self.entry.entry_id, _mutate)
 
     async def _async_store_mark_history_logged(self) -> None:
         """Persist that this run's history entry (and reservoir deduction,
@@ -1205,14 +1216,18 @@ class IrrigationScheduler:
         the store entry is about to survive (turn_off could not be
         confirmed). Without this, _async_recover_state's downtime-expired
         branch has no way to know the surviving record was already logged
-        and would log the SAME physical run again on the next restart.
+        and would log the SAME physical run again on the next restart. See
+        _async_store_mark_actuated for why this goes through the atomic
+        ``async_update_entry`` instead of a separate load()/save_entry().
         """
-        data = await self.store.async_load()
-        run_state = data["entries"].get(self.entry.entry_id)
-        if run_state is None:
-            return
-        run_state["history_logged"] = True
-        await self.store.async_save_entry(self.entry.entry_id, run_state)
+
+        def _mutate(run_state: dict[str, Any] | None) -> dict[str, Any] | None:
+            if run_state is None:
+                return None
+            run_state["history_logged"] = True
+            return run_state
+
+        await self.store.async_update_entry(self.entry.entry_id, _mutate)
 
     async def _async_log_history(
         self,
