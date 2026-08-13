@@ -1,7 +1,9 @@
+import { render } from "lit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { IrrigationScheduleCard, validateCardConfig } from "../src/card";
 import type { HassEntity, HistoryRun, HomeAssistant } from "../src/types";
+import type { HistoryDayGroup } from "../src/utils";
 
 const VALID_CONFIG = {
   type: "custom:irrigation-schedule-card",
@@ -991,6 +993,28 @@ describe("IrrigationScheduleCard last run + history dialog", () => {
     expect(text).toContain("manual");
     expect(text).toContain("10 min");
     expect(text).toContain("1.33 L/vaso");
+  });
+
+  it("shows the accumulated daily volume per pot in the day total", () => {
+    const card = makeCard();
+    const group: HistoryDayGroup = {
+      label: "Hoje",
+      entries: [historyRun(), historyRun()],
+      totalMl: 270_000,
+      perPotMl: 1_200,
+    };
+    const template = (
+      card as unknown as {
+        _renderHistoryDayGroup: (value: HistoryDayGroup) => unknown;
+      }
+    )._renderHistoryDayGroup(group);
+    const container = document.createElement("div");
+    render(template as Parameters<typeof render>[0], container);
+
+    const total = container.querySelector(".history-day-total")?.textContent ?? "";
+    expect(total).toContain("2 regas");
+    expect(total).toContain("270 L");
+    expect(total).toContain("1.2 L/vaso");
   });
 });
 

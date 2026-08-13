@@ -1125,6 +1125,9 @@ export class IrrigationScheduleCard extends LitElement {
           <span class="history-day-total">
             ${group.entries.length} ${group.entries.length === 1 ? "rega" : "regas"}
             ${group.totalMl > 0 ? html`· ${formatMl(group.totalMl)}` : ""}
+            ${group.perPotMl > 0
+              ? html` · ${formatMl(group.perPotMl)}/vaso`
+              : ""}
           </span>
         </div>
         ${group.entries.map((entry) => this._renderHistoryEntry(entry))}

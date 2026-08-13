@@ -162,7 +162,9 @@ describe("groupHistoryByDay", () => {
     // 450s @ 8 L/h/pot = 1000 ml/pot * 12 pots = 12000 ml;
     // 900s @ 8 L/h/pot = 2000 ml/pot * 12 pots = 24000 ml.
     expect(groups[0].totalMl).toBeCloseTo(36000);
+    expect(groups[0].perPotMl).toBeCloseTo(3000);
     expect(groups[1].totalMl).toBeCloseTo(24000);
+    expect(groups[1].perPotMl).toBeCloseTo(2000);
   });
 
   it("skips entries with an unparseable started_at instead of crashing", () => {

@@ -380,6 +380,8 @@ export interface HistoryDayGroup {
   entries: HistoryRun[];
   /** Sum of totalVolumeMl() across every run that day. */
   totalMl: number;
+  /** Sum delivered to EACH pot across every run that day. */
+  perPotMl: number;
 }
 
 /**
@@ -452,6 +454,7 @@ export function groupHistoryByDay(
         label: dayLabelFor(entry.started_at, nowIso, timeZone),
         entries: [],
         totalMl: 0,
+        perPotMl: 0,
       };
       groups.set(key, group);
     }
@@ -459,6 +462,10 @@ export function groupHistoryByDay(
     const total = totalVolumeMl(entry.flow_rate_lph, entry.duration, entry.number_of_pots);
     if (total !== null) {
       group.totalMl += total;
+    }
+    const perPot = perPotVolumeMl(entry.flow_rate_lph, entry.duration);
+    if (perPot !== null) {
+      group.perPotMl += perPot;
     }
   }
   return Array.from(groups.values());
