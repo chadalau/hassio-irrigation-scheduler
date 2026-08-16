@@ -543,6 +543,27 @@ function secondsSinceMidnightInZone(date: Date, timeZone?: string): number {
  * applies (today isn't an active day, the schedule is disabled, or the
  * time already passed with no warning AND no matching history entry, which
  * is ambiguous rather than a known-good or known-bad state). */
+/**
+ * How many enabled schedules are set to run on today's weekday (in the
+ * zone's own timezone). Drives the card's summary headline; unlike
+ * ``scheduleStatusToday`` this only asks "is it on today's calendar", not
+ * whether it already ran.
+ */
+export function countSchedulesToday(
+  schedules: readonly Schedule[],
+  nowIso: string,
+  timeZone?: string,
+): number {
+  const now = new Date(nowIso);
+  if (Number.isNaN(now.getTime())) {
+    return 0;
+  }
+  const today = weekdayInZone(now, timeZone);
+  return schedules.filter(
+    (schedule) => schedule.enabled && schedule.days.includes(today),
+  ).length;
+}
+
 export function scheduleStatusToday(
   schedule: Schedule,
   hasWarning: boolean,

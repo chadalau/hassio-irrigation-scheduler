@@ -1,6 +1,16 @@
 import { css } from "lit";
 
 export const cardStyles = css`
+  /* Mirrors the sibling light_scheduler card's token block so both cards
+     share one visual language. The green is that card's own value rather
+     than the theme's --success-color, which varies per theme and would
+     drift the two apart. */
+  :host {
+    display: block;
+    --w-blue: var(--primary-color, #03a9f4);
+    --w-green: #76d84b;
+  }
+
   ha-card {
     overflow: hidden;
   }
@@ -11,32 +21,275 @@ export const cardStyles = css`
 
   .header {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 16px 16px 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 16px 0;
   }
 
-  .header-top {
+  .zone-icon {
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: rgba(127, 127, 127, 0.22);
+    color: var(--primary-color, #03a9f4);
+  }
+
+  .zone-icon ha-icon {
+    --mdc-icon-size: 20px;
+  }
+
+  .header-title {
+    margin: 0;
+    flex: 1 1 110px;
+    font-size: 20px;
+    line-height: 1.2;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+    color: var(--primary-text-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .header-right {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 8px;
+    flex-shrink: 0;
+    margin-left: auto;
+  }
+
+  .icon-button {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--secondary-text-color);
+    cursor: pointer;
+  }
+
+  .icon-button:hover {
+    background: rgba(127, 127, 127, 0.14);
+  }
+
+  .icon-button ha-icon {
+    --mdc-icon-size: 20px;
+  }
+
+  .status {
+    flex-shrink: 0;
+  }
+
+  .zone-icon {
+    flex-shrink: 0;
+  }
+
+  /* Outlined chip rather than a filled pill: the state reads as a label on
+     the card, not as a button competing with the toggle beside it. */
+  .status {
+    height: 24px;
+    padding: 0 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid currentColor;
+    border-radius: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .status ha-icon {
+    --mdc-icon-size: 14px;
+  }
+
+  .status-watering {
+    color: var(--primary-color, #03a9f4);
+    background: rgba(3, 169, 244, 0.09);
+  }
+
+  .status-scheduled {
+    color: var(--w-green);
+    background: rgba(73, 190, 42, 0.09);
+  }
+
+  .status-disabled {
+    color: var(--secondary-text-color);
+  }
+
+  .summary {
+    margin: 12px 16px 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 14px;
+  }
+
+  .summary-main {
+    min-width: 0;
+  }
+
+  .summary-main strong {
+    display: block;
+    font-size: 22px;
+    line-height: 1.1;
+    letter-spacing: -0.35px;
+  }
+
+  .summary-main span {
+    display: block;
+    margin-top: 5px;
+    color: var(--secondary-text-color);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .summary-stat {
+    text-align: right;
+    min-width: 78px;
+  }
+
+  .summary-stat span {
+    display: block;
+    font-size: 10px;
+    color: var(--secondary-text-color);
+  }
+
+  .summary-stat strong {
+    display: block;
+    margin-top: 1px;
+    font-size: 21px;
+    line-height: 1.1;
+    letter-spacing: -0.35px;
+  }
+
+  .section-title {
+    margin: 0 0 8px;
+    font-size: 13px;
+    line-height: 1.25;
+    font-weight: 600;
+    color: var(--primary-text-color);
+  }
+
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .metric {
+    min-width: 0;
+    height: 44px;
+    padding: 6px 8px;
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    align-items: center;
+    gap: 7px;
+    text-align: left;
+    border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.22));
+    border-radius: 7px;
+    background: rgba(127, 127, 127, 0.045);
+    color: var(--primary-text-color);
+    cursor: pointer;
+  }
+
+  .metric:hover {
+    background: rgba(127, 127, 127, 0.1);
+  }
+
+  .metric ha-icon {
+    --mdc-icon-size: 19px;
+    color: var(--secondary-text-color);
+  }
+
+  .metric-copy {
+    min-width: 0;
+  }
+
+  .metric-copy small {
+    display: block;
+    margin-bottom: 1px;
+    font-size: 9px;
+    color: var(--secondary-text-color);
+  }
+
+  .metric-copy strong {
+    display: block;
+    font-size: 11px;
+    line-height: 1.15;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .metric.ec-metric ha-icon,
+  .metric.ec-metric .metric-copy strong {
+    color: var(--primary-color, #03a9f4);
+  }
+
+  .metric.ph-metric.in-range ha-icon,
+  .metric.ph-metric.in-range .metric-copy strong {
+    color: var(--success-color, #4caf50);
+  }
+
+  .metric.ph-metric.out-of-range ha-icon,
+  .metric.ph-metric.out-of-range .metric-copy strong {
+    color: var(--error-color, #f44336);
+  }
+
+  .reservoir-level {
+    margin-top: 6px;
+    padding: 7px 9px;
+    border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.22));
+    border-radius: 7px;
+    background: rgba(127, 127, 127, 0.045);
+  }
+
+  .reservoir-level-top {
+    display: flex;
+    align-items: center;
     gap: 8px;
   }
 
-  .header-badges {
-    display: inline-grid;
-    grid-template-columns: auto auto auto auto auto auto;
-    column-gap: 3px;
-    row-gap: 2px;
-    align-items: center;
-    justify-items: start;
-    justify-content: start;
+  .reservoir-level-top small {
+    flex: 1;
+    min-width: 0;
+    font-size: 9px;
+    color: var(--secondary-text-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .reservoir-estimate {
-    font-size: 0.7rem;
-    color: var(--secondary-text-color);
+  .reservoir-level-top strong {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
     white-space: nowrap;
+  }
+
+  .reservoir-level-bar {
+    height: 5px;
+    margin-top: 5px;
+    border-radius: 999px;
+    background: rgba(127, 127, 127, 0.28);
+    overflow: hidden;
+  }
+
+  .reservoir-level-fill {
+    height: 100%;
+    border-radius: inherit;
+    background: var(--primary-color, #03a9f4);
   }
 
   .refill-button {
@@ -62,109 +315,19 @@ export const cardStyles = css`
     --mdc-icon-size: 14px;
   }
 
-  .reservoir-label {
-    display: inline-flex;
-    align-items: center;
-    padding: 3px 8px;
-    border-radius: 999px;
-    background: var(--secondary-background-color, rgba(255, 255, 255, 0.08));
-    color: var(--warning-color, #ff9800);
-    font-size: 0.7rem;
-    font-weight: 600;
-  }
-
-  .header-title {
-    font-size: 1.1rem;
-    font-weight: 500;
-    color: var(--primary-text-color);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
-  }
-
-  .sensor-badge {
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    padding: 3px 10px;
-    border: none;
-    border-radius: 999px;
-    background: rgba(3, 169, 244, 0.16);
-    color: var(--primary-color, #03a9f4);
-    font-size: 0.85rem;
-    font-weight: 600;
-    white-space: nowrap;
-    cursor: pointer;
-  }
-
-  .sensor-badge:hover {
-    filter: brightness(1.15);
-  }
-
-  .sensor-badge.in-range {
-    background: rgba(76, 175, 80, 0.18);
-    color: var(--success-color, #4caf50);
-  }
-
-  .sensor-badge.out-of-range {
-    background: rgba(244, 67, 54, 0.18);
-    color: var(--error-color, #f44336);
-  }
-
-  .sensor-badge.volume-badge {
-    background: var(--secondary-background-color, rgba(255, 255, 255, 0.08));
-    color: var(--secondary-text-color);
-    cursor: default;
-  }
-
-  .header-right {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-shrink: 0;
-  }
-
-  .status {
-    font-size: 0.75rem;
-    line-height: 1;
-    padding: 4px 8px;
-    border-radius: 999px;
-    white-space: nowrap;
-  }
-
-  .status-watering {
-    background: var(--primary-color, #03a9f4);
-    color: var(--text-primary-color, #fff);
-  }
-
-  .status-scheduled {
-    background: var(--secondary-background-color, rgba(0, 0, 0, 0.05));
-    color: var(--primary-text-color);
-  }
-
-  .status-disabled {
-    background: var(--error-color, #db4437);
-    color: var(--text-primary-color, #fff);
-  }
-
-  .next-run {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 2px 16px;
-    font-size: 0.85rem;
-    color: var(--secondary-text-color);
-  }
-
   .last-run {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 2px 16px;
-    font-size: 0.85rem;
+    margin: 10px 16px 0;
+    font-size: 10px;
     color: var(--secondary-text-color);
     cursor: pointer;
+  }
+
+  .last-run ha-icon {
+    --mdc-icon-size: 15px;
+    flex-shrink: 0;
   }
 
   .last-run:hover {
@@ -172,14 +335,14 @@ export const cardStyles = css`
   }
 
   .last-run-chevron {
-    --mdc-icon-size: 18px;
+    --mdc-icon-size: 15px;
     flex-shrink: 0;
   }
 
   .section-divider {
     height: 1px;
-    background: var(--divider-color, rgba(0, 0, 0, 0.12));
-    margin: 8px 16px 0;
+    background: var(--divider-color, rgba(127, 127, 127, 0.16));
+    margin: 11px 16px 10px;
   }
 
   .card-body .section-divider {
@@ -266,111 +429,200 @@ export const cardStyles = css`
   }
 
   .watering-bar {
-    padding: 8px 16px;
-    background: rgba(3, 169, 244, 0.08);
+    /* 16px matches the horizontal inset every other section uses (.header,
+       .card-body, .summary, .last-run) so the progress bar lines up with the
+       text above and the schedule boxes below. */
+    margin: 10px 16px 0;
   }
 
   .watering-info {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 8px;
+    gap: 10px;
+    color: var(--secondary-text-color);
+    font-size: 10px;
   }
 
   .watering-left {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-weight: 500;
-    color: var(--primary-text-color);
+    min-width: 0;
+  }
+
+  /* The ellipsis has to live on the text element itself: .watering-left is a
+     flex container, and text-overflow only applies to the block container the
+     text actually overflows -- on the flex parent it would be a no-op. */
+  .watering-left span:not(.watering-dot) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .watering-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin-right: 5px;
+    border-radius: 50%;
+    background: var(--w-green);
+    flex-shrink: 0;
   }
 
   .watering-remaining {
     font-variant-numeric: tabular-nums;
-    font-weight: 600;
     color: var(--primary-color, #03a9f4);
+    white-space: nowrap;
+  }
+
+  .watering-progress-row {
+    margin-top: 7px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 88px;
+    align-items: center;
+    gap: 10px;
   }
 
   .progress-track {
     height: 6px;
-    border-radius: 3px;
-    background: var(--divider-color, rgba(0, 0, 0, 0.12));
+    border-radius: 999px;
     overflow: hidden;
+    background: rgba(127, 127, 127, 0.28);
   }
 
   .progress-fill {
     height: 100%;
-    border-radius: 3px;
+    border-radius: inherit;
     background: var(--primary-color, #03a9f4);
     transition: width 1s linear;
   }
 
-  .watering-actions {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 8px;
+  .watering-stop-button {
+    height: 31px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid rgba(127, 127, 127, 0.32);
+    border-radius: 5px;
+    background: transparent;
+    color: var(--w-blue);
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .watering-stop-button:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  .watering-stop-button ha-icon {
+    --mdc-icon-size: 13px;
   }
 
   .schedules {
-    margin-top: 8px;
+    display: grid;
+    gap: 4px;
   }
 
   .schedule-row {
     display: grid;
     grid-template-columns: auto 1fr auto;
     align-items: center;
-    gap: 8px;
-    padding: 2px 0;
-    border-bottom: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
+    gap: 7px;
+    padding: 2px 8px;
+    border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.22));
+    border-radius: 6px;
+    background: rgba(127, 127, 127, 0.04);
   }
 
-  .schedule-row:last-child {
-    border-bottom: none;
+  .schedule-row:hover {
+    background: rgba(127, 127, 127, 0.1);
   }
+
+  /* Geometry copied from light_scheduler's .toggle: a 30x18 rail with a
+     14px knob travelling 12px. */
+  .toggle {
+    position: relative;
+    width: 30px;
+    height: 18px;
+    flex: none;
+    border: none;
+    border-radius: 999px;
+    padding: 0;
+    background: none;
+    cursor: pointer;
+  }
+
+  .toggle .track {
+    position: absolute;
+    inset: 0;
+    border-radius: 999px;
+    background: var(--w-green);
+    transition: background 0.15s ease;
+    pointer-events: none;
+  }
+
+  .toggle .thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+    transform: translateX(12px);
+    transition: transform 0.15s ease;
+    pointer-events: none;
+  }
+
+  .toggle.off .track {
+    background: rgba(127, 127, 127, 0.4);
+  }
+
+  .toggle.off .thumb {
+    transform: translateX(0);
+  }
+
+  /* Comfortable hit area without changing the 18px visual; the inset stays
+     inside the header gap / row padding so it never steals a neighbour's
+     clicks. */
+  .toggle::before {
+    content: "";
+    position: absolute;
+    inset: -7px -5px;
+  }
+
+  .toggle:disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+
+  .toggle:focus-visible {
+    outline: 2px solid var(--w-blue);
+    outline-offset: 2px;
+  }
+
+
 
   .schedule-info {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
     min-width: 0;
   }
 
   .schedule-info-top {
     display: flex;
     align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .schedule-row ha-switch {
-    /* Material 2 (mwc-switch based) size vars. */
-    --mdc-switch-track-height: 12px;
-    --mdc-switch-track-width: 20px;
-    --mdc-switch-state-layer-size: 16px;
-    /* Material 3 (md-switch based) size vars -- newer HA versions render
-       ha-switch through this component instead, which ignores the mdc-*
-       vars above entirely. */
-    --md-switch-track-width: 28px;
-    --md-switch-track-height: 16px;
-    --md-switch-state-layer-size: 20px;
-    --md-switch-selected-handle-width: 12px;
-    --md-switch-selected-handle-height: 12px;
-    --md-switch-unselected-handle-width: 10px;
-    --md-switch-unselected-handle-height: 10px;
-    --md-switch-selected-icon-size: 0px;
-    --md-switch-unselected-icon-size: 0px;
-    flex-shrink: 0;
-    /* ha-switch keeps an invisible touch-target inset around the visible
-       track regardless of the size vars above. Trim it on the LEFT only (no
-       sibling there, it is the row's first column) so the switch doesn't
-       waste space; keep the right side clear so it doesn't crowd the info
-       column beyond the row's own column gap. */
-    margin: 0 6px 0 -10px;
+    gap: 7px;
   }
 
   .schedule-time {
-    font-size: 1rem;
+    font-size: 11px;
+    line-height: 1.15;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
@@ -384,8 +636,9 @@ export const cardStyles = css`
   }
 
   .day-initial {
-    font-size: 0.8rem;
-    width: 15px;
+    font-size: 10px;
+    line-height: 1.15;
+    width: 11px;
     text-align: center;
     color: var(--disabled-text-color, rgba(255, 255, 255, 0.3));
   }
@@ -396,13 +649,13 @@ export const cardStyles = css`
   }
 
   .warning-icon {
-    --mdc-icon-size: 18px;
+    --mdc-icon-size: 13px;
     color: var(--warning-color, #ff9800);
     flex-shrink: 0;
   }
 
   .status-icon {
-    --mdc-icon-size: 18px;
+    --mdc-icon-size: 13px;
     flex-shrink: 0;
   }
 
@@ -415,7 +668,8 @@ export const cardStyles = css`
   }
 
   .schedule-duration {
-    font-size: 0.9rem;
+    font-size: 9px;
+    line-height: 1.2;
     color: var(--secondary-text-color);
     min-width: 0;
   }
@@ -460,9 +714,9 @@ export const cardStyles = css`
   }
 
   .schedule-actions ha-icon-button {
-    --mdc-icon-button-size: 20px;
+    --mdc-icon-button-size: 18px;
     --mdc-icon-size: 13px;
-    margin: 0 -6px;
+    margin: 0 -3px;
   }
 
   .empty {
@@ -472,34 +726,62 @@ export const cardStyles = css`
     font-size: 0.9rem;
   }
 
-  .actions {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-top: 12px;
-  }
-
-  .action-circle {
-    width: 38px;
-    height: 38px;
-    flex-shrink: 0;
-    border-radius: 50%;
-    background: var(--primary-color, #03a9f4);
-    color: var(--text-primary-color, #fff);
-    border: none;
+  .add-schedule-button {
+    width: 100%;
+    height: 31px;
+    margin-top: 5px;
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 6px;
+    border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.3));
+    border-radius: 6px;
+    background: transparent;
+    color: var(--w-blue);
+    font-size: 11px;
+    font-weight: 500;
     cursor: pointer;
   }
 
-  .action-circle:disabled {
+  .add-schedule-button:hover {
+    background: rgba(127, 127, 127, 0.08);
+  }
+
+  .add-schedule-button ha-icon {
+    --mdc-icon-size: 15px;
+  }
+
+  .actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    margin-top: 9px;
+  }
+
+  .water-now-button {
+    height: 31px;
+    padding: 0 13px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: none;
+    border-radius: 6px;
+    background: var(--w-blue);
+    color: var(--text-primary-color, #fff);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .water-now-button:disabled {
     opacity: 0.5;
     cursor: default;
   }
 
-  .action-circle ha-icon {
-    --mdc-icon-size: 20px;
+  .water-now-button ha-icon {
+    --mdc-icon-size: 15px;
   }
 
   .config-error {
@@ -713,7 +995,7 @@ export const cardStyles = css`
   }
 
   .compact .schedule-days,
-  .compact .next-run,
+  .compact .summary-main span,
   .compact .last-run {
     display: none;
   }

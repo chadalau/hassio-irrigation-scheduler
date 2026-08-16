@@ -13,6 +13,7 @@ import { IrrigationScheduleCardEditor } from "./editor";
 import { cardStyles } from "./styles";
 import {
   averageDailyVolumeL,
+  countSchedulesToday,
   dayInitials,
   dayLabelFor,
   dayLabels,
@@ -23,6 +24,7 @@ import {
   formatReservoirEstimate,
   formatSensorReading,
   formatTime,
+  formatVolume,
   formatVolumeFraction,
   groupHistoryByDay,
   perPotVolumeMl,
@@ -315,6 +317,11 @@ export class IrrigationScheduleCard extends LitElement {
       : switchOn
         ? "status-scheduled"
         : "status-disabled";
+    const statusIcon = wateringOn
+      ? "mdi:water"
+      : switchOn
+        ? "mdi:calendar-check"
+        : "mdi:calendar-remove";
 
     const finishesAt = this._stringAttr(binaryEntity, "finishes_at");
     const startedAt = this._stringAttr(binaryEntity, "started_at");
@@ -327,23 +334,25 @@ export class IrrigationScheduleCard extends LitElement {
     const lastRun = this._lastRunAttr(binaryEntity);
     const history = this._historyAttr(binaryEntity);
 
-    const volumeBadge =
-      reservoirVolume > 0
-        ? html`<span class="sensor-badge volume-badge"
-            >${formatVolumeFraction(reservoirRemaining, reservoirVolume)}</span
-          >`
-        : "";
     const avgDailyVolume = averageDailyVolumeL(schedules, flowRate, numberOfPots);
     const estimateText = formatReservoirEstimate(reservoirRemaining, avgDailyVolume);
-    const estimateBadge =
-      reservoirVolume > 0 && estimateText
-        ? html`<span class="reservoir-estimate">${estimateText}</span>`
-        : "";
+    const todayCount = countSchedulesToday(
+      schedules,
+      nowIso,
+      this.hass?.config?.time_zone,
+    );
+    // Clamped so a stale remaining value above the configured capacity (or a
+    // negative one) can never overflow or invert the level bar.
+    const reservoirPct =
+      reservoirVolume > 0
+        ? Math.min(100, Math.max(0, (reservoirRemaining / reservoirVolume) * 100))
+        : 0;
     const refillButton =
       reservoirVolume > 0
         ? html`
             <button
               class="refill-button"
+              type="button"
               title="Reabastecer reservatório"
               aria-label="Reabastecer reservatório"
               @click=${this._refillReservoir}
@@ -363,57 +372,70 @@ export class IrrigationScheduleCard extends LitElement {
     return html`
       <ha-card class=${compact ? "compact" : ""}>
         <div class="header">
-          <div class="header-top">
-            <div class="header-title" title=${this._config.entity ?? ""}>
-              ${this._zoneName(sensor)}
+            <div class="zone-icon">
+              <ha-icon icon="mdi:water"></ha-icon>
             </div>
+            <h2 class="header-title" title=${this._config.entity ?? ""}>
+              ${this._zoneName(sensor)}
+            </h2>
+            <span class="status ${statusClass}">
+              <ha-icon icon=${statusIcon}></ha-icon>
+              ${statusText}
+            </span>
             <div class="header-right">
-              <span class="status ${statusClass}">${statusText}</span>
               ${switchEntity
                 ? html`
-                    <ha-switch
-                      .checked=${switchOn}
-                      title=${switchOn ? "Agendamento ativo" : "Agendamento desativado"}
-                      @change=${(ev: Event) => this._toggleMaster(switchEntity, ev)}
-                    ></ha-switch>
+                    <button
+                      class="toggle ${switchOn ? "" : "off"}"
+                      type="button"
+                      role="switch"
+                      aria-checked=${switchOn}
+                      title=${`Agendamento automático: ${switchOn ? "ativo" : "desativado"}`}
+                      aria-label="Agendamento automático"
+                      @click=${() => this._toggleMaster(switchEntity, switchOn)}
+                    >
+                      <span class="track"></span>
+                      <span class="thumb"></span>
+                    </button>
                   `
-                : html`<ha-switch disabled></ha-switch>`}
-              <ha-icon-button
+                : html`
+                    <button
+                      class="toggle off"
+                      type="button"
+                      role="switch"
+                      aria-checked="false"
+                      title="Agendamento automático: indisponível"
+                      aria-label="Agendamento automático (indisponível)"
+                      disabled
+                    >
+                      <span class="track"></span>
+                      <span class="thumb"></span>
+                    </button>
+                  `}
+              <button
+                class="icon-button"
+                type="button"
                 title="Configurar vazão e vasos"
                 aria-label="Configurar vazão e vasos"
                 @click=${this._openSettings}
               >
-                <ha-icon icon="mdi:cog"></ha-icon>
-              </ha-icon-button>
+                <ha-icon icon="mdi:cog-outline"></ha-icon>
+              </button>
             </div>
+        </div>
+
+        <div class="summary">
+          <div class="summary-main">
+            <strong>${todayCount === 1 ? "1 horário hoje" : `${todayCount} horários hoje`}</strong>
+            ${showNextRun
+              ? html`<span>Próxima: ${this._nextRunText(sensor.state)}</span>`
+              : ""}
           </div>
-          ${showRow1 || showRow2
+          ${avgDailyVolume > 0
             ? html`
-                <div class="header-badges">
-                  ${showRow1
-                    ? this._renderReservoirRow(
-                        showRow2 ? "R1" : "",
-                        1,
-                        phEntityId,
-                        phStatusClass,
-                        ecEntityId,
-                        volumeBadge,
-                        estimateBadge,
-                        refillButton,
-                      )
-                    : ""}
-                  ${showRow2
-                    ? this._renderReservoirRow(
-                        showRow1 ? "R2" : "",
-                        2,
-                        phEntityId2,
-                        phStatusClass2,
-                        ecEntityId2,
-                        volumeBadge,
-                        estimateBadge,
-                        refillButton,
-                      )
-                    : ""}
+                <div class="summary-stat">
+                  <span>Volume/dia</span>
+                  <strong>${formatVolume(avgDailyVolume)}</strong>
                 </div>
               `
             : ""}
@@ -439,7 +461,7 @@ export class IrrigationScheduleCard extends LitElement {
               <div class="watering-bar">
                 <div class="watering-info">
                   <div class="watering-left">
-                    <ha-icon icon="mdi:sprinkler-variant"></ha-icon>
+                    <span class="watering-dot"></span>
                     <span>
                       Regando${activeSource === "external"
                         ? ` · ${sourceLabel(activeSource)}`
@@ -447,30 +469,25 @@ export class IrrigationScheduleCard extends LitElement {
                     </span>
                   </div>
                   <div class="watering-remaining">
-                    ${formatRemaining(remaining)}
+                    ${formatRemaining(remaining)} restantes
                   </div>
                 </div>
-                <div class="progress-track">
-                  <div
-                    class="progress-fill"
-                    style="width: ${progress}%"
-                  ></div>
-                </div>
-                <div class="watering-actions">
-                  <ha-button outlined @click=${this._stopWatering}>
+                <div class="watering-progress-row">
+                  <div class="progress-track">
+                    <div
+                      class="progress-fill"
+                      style="width: ${progress}%"
+                    ></div>
+                  </div>
+                  <button
+                    class="watering-stop-button"
+                    type="button"
+                    @click=${this._stopWatering}
+                  >
                     <ha-icon icon="mdi:stop"></ha-icon>
                     Parar
-                  </ha-button>
+                  </button>
                 </div>
-              </div>
-            `
-          : ""}
-
-        ${!wateringOn && showNextRun
-          ? html`
-              <div class="next-run">
-                <ha-icon icon="mdi:clock-start"></ha-icon>
-                <span>Próximo: ${this._nextRunText(sensor.state)}</span>
               </div>
             `
           : ""}
@@ -486,9 +503,60 @@ export class IrrigationScheduleCard extends LitElement {
             `
           : ""}
 
+        ${showRow1 || showRow2
+          ? html`
+              <div class="section-divider"></div>
+              <div class="card-body">
+                <h3 class="section-title">Reservatório</h3>
+                <div class="metrics">
+                  ${showRow1
+                    ? this._renderReservoirMetrics(
+                        showRow2 ? " R1" : "",
+                        1,
+                        phEntityId,
+                        phStatusClass,
+                        ecEntityId,
+                      )
+                    : ""}
+                  ${showRow2
+                    ? this._renderReservoirMetrics(
+                        showRow1 ? " R2" : "",
+                        2,
+                        phEntityId2,
+                        phStatusClass2,
+                        ecEntityId2,
+                      )
+                    : ""}
+                </div>
+                ${reservoirVolume > 0
+                  ? html`
+                      <div class="reservoir-level">
+                        <div class="reservoir-level-top">
+                          <small>
+                            Volume${estimateText ? ` · restam ${estimateText}` : ""}
+                          </small>
+                          <strong>
+                            ${formatVolumeFraction(reservoirRemaining, reservoirVolume)}
+                          </strong>
+                          ${refillButton}
+                        </div>
+                        <div class="reservoir-level-bar">
+                          <div
+                            class="reservoir-level-fill"
+                            style="width: ${reservoirPct}%"
+                          ></div>
+                        </div>
+                      </div>
+                    `
+                  : ""}
+              </div>
+            `
+          : ""}
+
         <div class="section-divider"></div>
 
         <div class="card-body">
+          <h3 class="section-title">Agenda automática</h3>
           <div class="schedules">
             ${schedules.length === 0
               ? html`<div class="empty">Nenhum horário configurado.</div>`
@@ -505,26 +573,34 @@ export class IrrigationScheduleCard extends LitElement {
                 )}
           </div>
 
-          <div class="section-divider"></div>
+          <button
+            class="add-schedule-button"
+            type="button"
+            title="Adicionar horário"
+            aria-label="Adicionar horário"
+            @click=${this._openAdd}
+          >
+            <ha-icon icon="mdi:plus"></ha-icon>
+            Adicionar horário
+          </button>
 
-          <div class="actions">
-            <button class="action-circle" title="Adicionar horário" aria-label="Adicionar horário" @click=${this._openAdd}>
-              <ha-icon icon="mdi:plus"></ha-icon>
-            </button>
-            ${showWaterNow
-              ? html`
+          ${showWaterNow
+            ? html`
+                <div class="actions">
                   <button
-                    class="action-circle"
+                    class="water-now-button"
+                    type="button"
                     title="Regar agora"
                     aria-label="Regar agora"
                     ?disabled=${wateringOn}
                     @click=${this._waterNow}
                   >
                     <ha-icon icon="mdi:play"></ha-icon>
+                    Regar agora
                   </button>
-                `
-              : ""}
-          </div>
+                </div>
+              `
+            : ""}
         </div>
       </ha-card>
 
@@ -534,66 +610,61 @@ export class IrrigationScheduleCard extends LitElement {
   }
 
   /**
-   * One row of pH/EC/volume badges for a reservoir, as an ARRAY of
-   * siblings rather than one combined template: each element must land as
-   * its own direct child of `.header-badges` for the CSS grid's
-   * `grid-template-columns` to size (and align) each column correctly.
-   * ``label`` ("R1"/"R2") is only passed when BOTH reservoirs are shown --
-   * with a single reservoir there is nothing to disambiguate, so callers
-   * pass "" and this renders an empty placeholder in that grid cell instead
-   * (keeps the row at a fixed 6 columns either way).
+   * The pH and EC metric tiles for one reservoir. ``label`` (" R1"/" R2") is
+   * only passed when BOTH reservoirs are shown -- with a single reservoir
+   * there is nothing to disambiguate, so callers pass "" and the tiles read
+   * plain "pH"/"EC". Each tile stays a button so clicking it still opens
+   * HA's native history dialog for that sensor.
    */
-  private _renderReservoirRow(
+  private _renderReservoirMetrics(
     label: string,
     reservoirNumber: 1 | 2,
     phEntityId: string,
     phStatusClass: string,
     ecEntityId: string,
-    volumeBadge: TemplateResult | "",
-    estimateBadge: TemplateResult | "",
-    refillButton: TemplateResult | "",
-  ): (TemplateResult | "")[] {
-    const phBadge = phEntityId
-      ? html`
-          <button
-            class="sensor-badge ph-badge ${phStatusClass}"
-            title="Ver histórico do pH (reservatório ${reservoirNumber})"
-            @click=${() => this._openMoreInfo(phEntityId)}
-          >
-            ${this._sensorBadgeText(
-              phEntityId,
-              "pH ?",
-              (value) => `${formatSensorReading(value)} PH`,
-            )}
-          </button>
-        `
-      : html`<span></span>`;
-    const ecBadge = ecEntityId
-      ? html`
-          <button
-            class="sensor-badge ec-badge"
-            title="Ver histórico da EC (reservatório ${reservoirNumber})"
-            @click=${() => this._openMoreInfo(ecEntityId)}
-          >
-            ${this._sensorBadgeText(
-              ecEntityId,
-              "EC ?",
-              (value, unit) => `EC ${formatSensorReading(value, unit)}`,
-            )}
-          </button>
-        `
-      : html`<span></span>`;
-    const labelBadge = label
-      ? html`<span class="reservoir-label">${label}</span>`
-      : html`<span></span>`;
-    return [
-      labelBadge,
-      phBadge,
-      ecBadge,
-      volumeBadge,
-      estimateBadge,
-      refillButton,
-    ];
+  ): TemplateResult {
+    return html`
+      ${phEntityId
+        ? html`
+            <button
+              class="metric ph-metric ${phStatusClass}"
+              type="button"
+              title="Ver histórico do pH (reservatório ${reservoirNumber})"
+              @click=${() => this._openMoreInfo(phEntityId)}
+            >
+              <ha-icon icon="mdi:flask"></ha-icon>
+              <div class="metric-copy">
+                <small>pH${label}</small>
+                <strong>
+                  ${this._sensorBadgeText(phEntityId, "?", (value) =>
+                    formatSensorReading(value),
+                  )}
+                </strong>
+              </div>
+            </button>
+          `
+        : ""}
+      ${ecEntityId
+        ? html`
+            <button
+              class="metric ec-metric"
+              type="button"
+              title="Ver histórico da EC (reservatório ${reservoirNumber})"
+              @click=${() => this._openMoreInfo(ecEntityId)}
+            >
+              <ha-icon icon="mdi:lightning-bolt"></ha-icon>
+              <div class="metric-copy">
+                <small>EC${label}</small>
+                <strong>
+                  ${this._sensorBadgeText(ecEntityId, "?", (value, unit) =>
+                    formatSensorReading(value, unit),
+                  )}
+                </strong>
+              </div>
+            </button>
+          `
+        : ""}
+    `;
   }
 
   private _renderScheduleRow(
@@ -610,10 +681,20 @@ export class IrrigationScheduleCard extends LitElement {
     const status = scheduleStatusToday(schedule, Boolean(warning), history, nowIso, timeZone);
     return html`
       <div class="schedule-row">
-        <ha-switch
-          ?checked=${schedule.enabled}
-          @change=${(ev: Event) => this._toggleScheduleEnabled(schedule, ev)}
-        ></ha-switch>
+        <button
+          class="toggle ${schedule.enabled ? "" : "off"}"
+          type="button"
+          role="switch"
+          aria-checked=${schedule.enabled}
+          title=${`Horário das ${formatTime(schedule.time)}: ${
+            schedule.enabled ? "ativo" : "desativado"
+          }`}
+          aria-label=${`Horário das ${formatTime(schedule.time)}`}
+          @click=${() => this._toggleScheduleEnabled(schedule)}
+        >
+          <span class="track"></span>
+          <span class="thumb"></span>
+        </button>
         <div class="schedule-info">
           <div class="schedule-info-top">
             <div class="schedule-time">${formatTime(schedule.time)}</div>
@@ -836,10 +917,10 @@ export class IrrigationScheduleCard extends LitElement {
           ? html`<div class="form-error">${this._settingsError}</div>`
           : ""}
         <div class="settings-actions">
-          <button class="dialog-cancel" @click=${this._closeSettings}>
+          <button type="button" class="dialog-cancel" @click=${this._closeSettings}>
             Fechar
           </button>
-          <button class="dialog-save" @click=${this._saveSettings}>Salvar</button>
+          <button type="button" class="dialog-save" @click=${this._saveSettings}>Salvar</button>
         </div>
       </div>
     `;
@@ -1110,7 +1191,7 @@ export class IrrigationScheduleCard extends LitElement {
               : groups.map((group) => this._renderHistoryDayGroup(group))}
           </div>
           <div class="dialog-actions">
-            <button class="dialog-cancel" @click=${this._closeHistory}>Fechar</button>
+            <button type="button" class="dialog-cancel" @click=${this._closeHistory}>Fechar</button>
           </div>
         </div>
       </div>
@@ -1275,10 +1356,10 @@ export class IrrigationScheduleCard extends LitElement {
               : ""}
           </div>
           <div class="dialog-actions">
-            <button class="dialog-cancel" @click=${this._closeDialog}>
+            <button type="button" class="dialog-cancel" @click=${this._closeDialog}>
               Cancelar
             </button>
-            <button class="dialog-save" @click=${this._saveDialog}>Salvar</button>
+            <button type="button" class="dialog-save" @click=${this._saveDialog}>Salvar</button>
           </div>
         </div>
       </div>
@@ -1520,15 +1601,14 @@ export class IrrigationScheduleCard extends LitElement {
     this._callService("water_now");
   }
 
-  private _toggleMaster(entity: HassEntity, ev: Event): void {
-    const checked = (ev.target as CheckableElement).checked;
+  private _toggleMaster(entity: HassEntity, currentlyOn: boolean): void {
     if (!this.hass) {
       return;
     }
     void this.hass
       .callService(
         "switch",
-        checked ? "turn_on" : "turn_off",
+        currentlyOn ? "turn_off" : "turn_on",
         {},
         { entity_id: entity.entity_id },
       )
@@ -1550,9 +1630,8 @@ export class IrrigationScheduleCard extends LitElement {
     }
   }
 
-  private _toggleScheduleEnabled(schedule: Schedule, ev: Event): void {
-    const checked = (ev.target as CheckableElement).checked;
-    this._callService("update_schedule", { id: schedule.id, enabled: checked });
+  private _toggleScheduleEnabled(schedule: Schedule): void {
+    this._callService("update_schedule", { id: schedule.id, enabled: !schedule.enabled });
   }
 
   private _deleteSchedule(schedule: Schedule): void {

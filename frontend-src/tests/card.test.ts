@@ -2,6 +2,7 @@ import { render } from "lit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { IrrigationScheduleCard, validateCardConfig } from "../src/card";
+import { DOMAIN } from "../src/const";
 import type { HassEntity, HistoryRun, HomeAssistant } from "../src/types";
 import type { HistoryDayGroup } from "../src/utils";
 
@@ -258,7 +259,7 @@ describe("IrrigationScheduleCard schedule day indicator", () => {
 describe("IrrigationScheduleCard settings panel pH gate", () => {
   function openSettings(card: IrrigationScheduleCard): HTMLElement {
     const cog = card.shadowRoot?.querySelector(
-      'ha-icon-button[title="Configurar vazão e vasos"]',
+      'button.icon-button[title="Configurar vazão e vasos"]',
     ) as HTMLElement;
     cog.click();
     return cog;
@@ -429,13 +430,18 @@ describe("IrrigationScheduleCard pH/EC header badges", () => {
       [],
     );
 
-    const phBadge = card.shadowRoot?.querySelector(".ph-badge");
-    const ecBadge = card.shadowRoot?.querySelector(".ec-badge");
-    // pH shows "{value} PH" -- a fixed suffix, NOT the sensor's own
-    // unit_of_measurement (which is often itself "pH" and would otherwise
-    // duplicate into "PH 6.23pH"). EC keeps its real unit.
-    expect(phBadge?.textContent?.trim()).toBe("6.23 PH");
-    expect(ecBadge?.textContent?.trim()).toBe("EC 812.4 µS/cm");
+    const phBadge = card.shadowRoot?.querySelector(".ph-metric");
+    const ecBadge = card.shadowRoot?.querySelector(".ec-metric");
+    // The tile carries the label ("pH"/"EC") in its own <small>, so the
+    // value is bare -- no fixed "PH" suffix duplicating the label, and no
+    // sensor unit_of_measurement for pH (often itself "pH"). EC keeps its
+    // real unit, which is data rather than a label.
+    expect(phBadge?.querySelector("small")?.textContent?.trim()).toBe("pH");
+    expect(phBadge?.querySelector("strong")?.textContent?.trim()).toBe("6.23");
+    expect(ecBadge?.querySelector("small")?.textContent?.trim()).toBe("EC");
+    expect(ecBadge?.querySelector("strong")?.textContent?.trim()).toBe(
+      "812.4 µS/cm",
+    );
     // ph_min/ph_max default to 0/14 in baseSensor(): 6.234 is in range.
     expect(phBadge?.classList.contains("in-range")).toBe(true);
   });
@@ -459,9 +465,9 @@ describe("IrrigationScheduleCard pH/EC header badges", () => {
       [],
     );
 
-    const phBadge = card.shadowRoot?.querySelector(".ph-badge");
-    // The sensor's own unit ("pH") is ignored in favor of the fixed suffix.
-    expect(phBadge?.textContent?.trim()).toBe("7.8 PH");
+    const phBadge = card.shadowRoot?.querySelector(".ph-metric");
+    // The sensor's own unit ("pH") is ignored: the tile's label says it.
+    expect(phBadge?.querySelector("strong")?.textContent?.trim()).toBe("7.8");
     expect(phBadge?.classList.contains("out-of-range")).toBe(true);
     expect(phBadge?.classList.contains("in-range")).toBe(false);
   });
@@ -475,15 +481,15 @@ describe("IrrigationScheduleCard pH/EC header badges", () => {
       },
       [],
     );
-    expect(card.shadowRoot?.querySelector(".ph-badge")?.textContent?.trim()).toBe(
-      "pH ?",
-    );
+    const tile = card.shadowRoot?.querySelector(".ph-metric");
+    expect(tile).not.toBeNull();
+    expect(tile?.querySelector("strong")?.textContent?.trim()).toBe("?");
   });
 
   it("renders no badges when neither ph_entity_id nor ec_entity_id is configured", async () => {
     const card = await mountCard({ "sensor.jardim_next_run": baseSensor() }, []);
-    expect(card.shadowRoot?.querySelector(".ph-badge")).toBeNull();
-    expect(card.shadowRoot?.querySelector(".ec-badge")).toBeNull();
+    expect(card.shadowRoot?.querySelector(".ph-metric")).toBeNull();
+    expect(card.shadowRoot?.querySelector(".ec-metric")).toBeNull();
   });
 
   it("clicking the pH badge dispatches hass-more-info for that entity (opens HA's native history dialog)", async () => {
@@ -508,7 +514,7 @@ describe("IrrigationScheduleCard pH/EC header badges", () => {
       events.push(ev as CustomEvent),
     );
 
-    (card.shadowRoot?.querySelector(".ph-badge") as HTMLButtonElement).click();
+    (card.shadowRoot?.querySelector(".ph-metric") as HTMLButtonElement).click();
 
     expect(events).toHaveLength(1);
     expect(events[0].detail).toEqual({ entityId: "sensor.reservatorio_ph" });
@@ -557,21 +563,27 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
       [],
     );
 
-    const labels = card.shadowRoot?.querySelectorAll(".reservoir-label");
-    const phBadges = card.shadowRoot?.querySelectorAll(".ph-badge");
-    const ecBadges = card.shadowRoot?.querySelectorAll(".ec-badge");
-    expect(labels?.[0].textContent?.trim()).toBe("R1");
-    expect(labels?.[1].textContent?.trim()).toBe("R2");
-    expect(phBadges).toHaveLength(2);
-    expect(ecBadges).toHaveLength(2);
-    // No " R2" text suffix: the row's own "R2" pill already disambiguates.
-    expect(phBadges?.[0].textContent?.trim()).toBe("6 PH");
-    expect(phBadges?.[1].textContent?.trim()).toBe("6.4 PH");
-    expect(ecBadges?.[0].textContent?.trim()).toBe("EC 800 µS/cm");
-    expect(ecBadges?.[1].textContent?.trim()).toBe("EC 1200 µS/cm");
+    const phTiles = card.shadowRoot?.querySelectorAll(".ph-metric");
+    const ecTiles = card.shadowRoot?.querySelectorAll(".ec-metric");
+    expect(phTiles).toHaveLength(2);
+    expect(ecTiles).toHaveLength(2);
+    // With two reservoirs the tile label carries the disambiguating suffix,
+    // so no separate "R1"/"R2" pill is needed.
+    const label = (el: Element | undefined) =>
+      el?.querySelector("small")?.textContent?.trim();
+    const value = (el: Element | undefined) =>
+      el?.querySelector("strong")?.textContent?.trim();
+    expect(label(phTiles?.[0])).toBe("pH R1");
+    expect(label(phTiles?.[1])).toBe("pH R2");
+    expect(label(ecTiles?.[0])).toBe("EC R1");
+    expect(label(ecTiles?.[1])).toBe("EC R2");
+    expect(value(phTiles?.[0])).toBe("6");
+    expect(value(phTiles?.[1])).toBe("6.4");
+    expect(value(ecTiles?.[0])).toBe("800 µS/cm");
+    expect(value(ecTiles?.[1])).toBe("1200 µS/cm");
   });
 
-  it("lays out each row as label/pH/EC in a 6-column grid so R1 and R2 columns align", async () => {
+  it("lays out the pH/EC tiles R1-then-R2 in the metrics grid", async () => {
     const card = await mountCard(
       {
         "sensor.jardim_next_run": baseSensor({
@@ -583,24 +595,25 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
       },
       [],
     );
-    const children = Array.from(
-      card.shadowRoot?.querySelector(".header-badges")?.children ?? [],
+    const tiles = Array.from(
+      card.shadowRoot?.querySelector(".metrics")?.children ?? [],
     );
-    // Row-major DOM order: R1's label/pH/EC, then R2's label/pH/EC. Visual
-    // column alignment comes from the CSS grid's 6 fixed columns (each sized
-    // to its own widest cell), not from DOM order -- see .header-badges.
-    expect(children).toHaveLength(6);
-    expect(children[0].classList.contains("reservoir-label")).toBe(true);
-    expect(children[0].textContent?.trim()).toBe("R1");
-    expect(children[1].classList.contains("ph-badge")).toBe(true);
-    expect(children[2].classList.contains("ec-badge")).toBe(true);
-    expect(children[3].classList.contains("reservoir-label")).toBe(true);
-    expect(children[3].textContent?.trim()).toBe("R2");
-    expect(children[4].classList.contains("ph-badge")).toBe(true);
-    expect(children[5].classList.contains("ec-badge")).toBe(true);
+    // DOM order is R1's pH/EC then R2's; the two-column CSS grid puts each
+    // reservoir on its own visual row -- see .metrics.
+    expect(tiles).toHaveLength(4);
+    expect(tiles.map((el) => el.className.split(" ")[1])).toEqual([
+      "ph-metric",
+      "ec-metric",
+      "ph-metric",
+      "ec-metric",
+    ]);
+    const labels = tiles.map((el) =>
+      el.querySelector("small")?.textContent?.trim(),
+    );
+    expect(labels).toEqual(["pH R1", "EC R1", "pH R2", "EC R2"]);
   });
 
-  it("shows the reservoir volume badge after EC, repeated on both rows", async () => {
+  it("shows the reservoir level ONCE even with two reservoirs configured", async () => {
     const card = await mountCard(
       {
         "sensor.jardim_next_run": baseSensor({
@@ -611,18 +624,22 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
       },
       [],
     );
-    const volumeBadges = card.shadowRoot?.querySelectorAll(".volume-badge");
-    expect(volumeBadges).toHaveLength(2);
-    expect(volumeBadges?.[0].textContent?.trim()).toBe("1000/1000 L");
-    expect(volumeBadges?.[1].textContent?.trim()).toBe("1000/1000 L");
+    // Only the pH/EC readings are per-reservoir; the zone tracks a single
+    // volume, so the level block renders once rather than per pH row.
+    const levels = card.shadowRoot?.querySelectorAll(".reservoir-level");
+    expect(levels).toHaveLength(1);
+    expect(
+      levels?.[0].querySelector("strong")?.textContent?.trim(),
+    ).toBe("1000/1000 L");
+    expect(card.shadowRoot?.querySelectorAll(".refill-button")).toHaveLength(1);
   });
 
-  it("does not show the volume badge when reservoir_volume_l is not configured", async () => {
+  it("does not show the reservoir level when reservoir_volume_l is not configured", async () => {
     const card = await mountCard(
       { "sensor.jardim_next_run": baseSensor({ ph_entity_id: "sensor.r1_ph" }) },
       [],
     );
-    expect(card.shadowRoot?.querySelectorAll(".volume-badge")).toHaveLength(0);
+    expect(card.shadowRoot?.querySelectorAll(".reservoir-level")).toHaveLength(0);
   });
 
   it("does not render R2 badges when R2 is not configured", async () => {
@@ -635,8 +652,8 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
       },
       [],
     );
-    expect(card.shadowRoot?.querySelectorAll(".ph-badge")).toHaveLength(1);
-    expect(card.shadowRoot?.querySelectorAll(".ec-badge")).toHaveLength(1);
+    expect(card.shadowRoot?.querySelectorAll(".ph-metric")).toHaveLength(1);
+    expect(card.shadowRoot?.querySelectorAll(".ec-metric")).toHaveLength(1);
   });
 
   it("shows the reservoir row (volume/estimate/refill) even without any pH/EC sensor configured", async () => {
@@ -649,11 +666,11 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
       },
       [],
     );
-    expect(card.shadowRoot?.querySelector(".volume-badge")).not.toBeNull();
+    expect(card.shadowRoot?.querySelector(".reservoir-level")).not.toBeNull();
     expect(card.shadowRoot?.querySelector(".refill-button")).not.toBeNull();
   });
 
-  it("does not show the R1/R2 label pill when only one reservoir is shown", async () => {
+  it("labels the tile plain 'pH' when only one reservoir is shown", async () => {
     const card = await mountCard(
       {
         "sensor.jardim_next_run": baseSensor({
@@ -663,14 +680,15 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
       },
       [],
     );
-    expect(card.shadowRoot?.querySelector(".reservoir-label")).toBeNull();
-    // The row still renders (pH badge + volume badge), just without the
-    // disambiguation pill.
-    expect(card.shadowRoot?.querySelector(".ph-badge")).not.toBeNull();
-    expect(card.shadowRoot?.querySelector(".volume-badge")).not.toBeNull();
+    const tile = card.shadowRoot?.querySelector(".ph-metric");
+    expect(tile).not.toBeNull();
+    // No "R1" suffix: with a single reservoir there is nothing to
+    // disambiguate against.
+    expect(tile?.querySelector("small")?.textContent?.trim()).toBe("pH");
+    expect(card.shadowRoot?.querySelector(".reservoir-level")).not.toBeNull();
   });
 
-  it("shows the R1/R2 label pill only when both reservoirs are shown", async () => {
+  it("suffixes the tile labels R1/R2 only when both reservoirs are shown", async () => {
     const card = await mountCard(
       {
         "sensor.jardim_next_run": baseSensor({
@@ -680,10 +698,10 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
       },
       [],
     );
-    const labels = card.shadowRoot?.querySelectorAll(".reservoir-label");
-    expect(labels).toHaveLength(2);
-    expect(labels?.[0].textContent?.trim()).toBe("R1");
-    expect(labels?.[1].textContent?.trim()).toBe("R2");
+    const labels = Array.from(
+      card.shadowRoot?.querySelectorAll(".ph-metric small") ?? [],
+    ).map((el) => el.textContent?.trim());
+    expect(labels).toEqual(["pH R1", "pH R2"]);
   });
 
   it("_saveSettings sends R2 fields only when their inputs were touched", async () => {
@@ -724,8 +742,10 @@ describe("IrrigationScheduleCard reservoir consumption tracking", () => {
       },
       [],
     );
-    const badge = card.shadowRoot?.querySelector(".volume-badge");
-    expect(badge?.textContent?.trim()).toBe("620/1000 L");
+    const level = card.shadowRoot?.querySelector(".reservoir-level");
+    expect(level?.querySelector("strong")?.textContent?.trim()).toBe(
+      "620/1000 L",
+    );
   });
 
   it("falls back to full capacity when reservoir_remaining_l is absent", async () => {
@@ -738,8 +758,10 @@ describe("IrrigationScheduleCard reservoir consumption tracking", () => {
       },
       [],
     );
-    const badge = card.shadowRoot?.querySelector(".volume-badge");
-    expect(badge?.textContent?.trim()).toBe("1000/1000 L");
+    const level = card.shadowRoot?.querySelector(".reservoir-level");
+    expect(level?.querySelector("strong")?.textContent?.trim()).toBe(
+      "1000/1000 L",
+    );
   });
 
   it("shows a time-until-empty estimate when there is an enabled schedule", async () => {
@@ -765,8 +787,10 @@ describe("IrrigationScheduleCard reservoir consumption tracking", () => {
       [],
     );
     // 60 L/h * 1h * 7 days/week -> 60 L/day avg -> 1000/60 ~= 16.7 days.
-    const estimate = card.shadowRoot?.querySelector(".reservoir-estimate");
-    expect(estimate?.textContent?.trim()).toBe("~17 dias");
+    const caption = card.shadowRoot?.querySelector(".reservoir-level small");
+    expect(caption?.textContent?.replace(/\s+/g, " ").trim()).toBe(
+      "Volume · restam ~17 dias",
+    );
   });
 
   it("hides the estimate when there is no enabled schedule (avg consumption is 0)", async () => {
@@ -781,7 +805,8 @@ describe("IrrigationScheduleCard reservoir consumption tracking", () => {
       },
       [],
     );
-    expect(card.shadowRoot?.querySelector(".reservoir-estimate")).toBeNull();
+    const caption = card.shadowRoot?.querySelector(".reservoir-level small");
+    expect(caption?.textContent?.replace(/\s+/g, " ").trim()).toBe("Volume");
   });
 
   it("does not show a refill button when reservoir_volume_l is not configured", async () => {
@@ -792,7 +817,7 @@ describe("IrrigationScheduleCard reservoir consumption tracking", () => {
     expect(card.shadowRoot?.querySelector(".refill-button")).toBeNull();
   });
 
-  it("repeats remaining/estimate/refill on both R1 and R2 rows", async () => {
+  it("renders remaining/estimate/refill once, not per reservoir", async () => {
     const card = await mountCard(
       {
         "sensor.jardim_next_run": baseSensor({
@@ -804,8 +829,11 @@ describe("IrrigationScheduleCard reservoir consumption tracking", () => {
       },
       [],
     );
-    expect(card.shadowRoot?.querySelectorAll(".volume-badge")).toHaveLength(2);
-    expect(card.shadowRoot?.querySelectorAll(".refill-button")).toHaveLength(2);
+    // The zone tracks ONE volume; only the pH/EC readings are per physical
+    // reservoir. The old layout duplicated these to fill a shared badge
+    // grid -- the level block now stands on its own below the tiles.
+    expect(card.shadowRoot?.querySelectorAll(".reservoir-level")).toHaveLength(1);
+    expect(card.shadowRoot?.querySelectorAll(".refill-button")).toHaveLength(1);
   });
 
   it("_refillReservoir calls the refill_reservoir service after confirmation", async () => {
@@ -1322,5 +1350,173 @@ describe("IrrigationScheduleCard schedule duration hh:mm:ss / volume picker", ()
     expect(withState._formDurationHour).toBe(before.h);
     expect(withState._formDurationMin).toBe(before.m);
     expect(withState._formDurationSec).toBe(before.s);
+  });
+});
+
+describe("IrrigationScheduleCard enable toggles", () => {
+  /** A master schedule-enabled switch entity in the given state. */
+  function masterSwitch(state: "on" | "off"): HassEntity {
+    return {
+      entity_id: "switch.jardim_schedule_enabled",
+      state,
+      last_changed: "",
+      last_updated: "",
+      attributes: { friendly_name: "Jardim agendamento" },
+    };
+  }
+
+  function masterToggle(card: IrrigationScheduleCard): HTMLButtonElement {
+    const el = card.shadowRoot?.querySelector<HTMLButtonElement>(
+      ".header-right .toggle",
+    );
+    if (!el) {
+      throw new Error("master toggle not rendered");
+    }
+    return el;
+  }
+
+  function scheduleToggles(card: IrrigationScheduleCard): HTMLButtonElement[] {
+    return Array.from(
+      card.shadowRoot?.querySelectorAll<HTMLButtonElement>(
+        ".schedule-row .toggle",
+      ) ?? [],
+    );
+  }
+
+  it("turns the master switch OFF when it is currently on", async () => {
+    const calls: ServiceCallRecord[] = [];
+    const card = await mountCard(
+      {
+        "sensor.jardim_next_run": baseSensor(),
+        "switch.jardim_schedule_enabled": masterSwitch("on"),
+      },
+      calls,
+    );
+
+    const toggle = masterToggle(card);
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(toggle.classList.contains("off")).toBe(false);
+
+    toggle.click();
+
+    expect(calls).toEqual([
+      {
+        domain: "switch",
+        service: "turn_off",
+        data: {},
+        target: { entity_id: "switch.jardim_schedule_enabled" },
+      },
+    ]);
+  });
+
+  it("turns the master switch ON when it is currently off", async () => {
+    const calls: ServiceCallRecord[] = [];
+    const card = await mountCard(
+      {
+        "sensor.jardim_next_run": baseSensor(),
+        "switch.jardim_schedule_enabled": masterSwitch("off"),
+      },
+      calls,
+    );
+
+    const toggle = masterToggle(card);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(toggle.classList.contains("off")).toBe(true);
+
+    toggle.click();
+
+    expect(calls).toEqual([
+      {
+        domain: "switch",
+        service: "turn_on",
+        data: {},
+        target: { entity_id: "switch.jardim_schedule_enabled" },
+      },
+    ]);
+  });
+
+  it("renders the master toggle disabled, named and inert without a switch entity", async () => {
+    const calls: ServiceCallRecord[] = [];
+    const card = await mountCard(
+      { "sensor.jardim_next_run": baseSensor({ switch_entity_id: null }) },
+      calls,
+    );
+
+    const toggle = masterToggle(card);
+    expect(toggle.disabled).toBe(true);
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    // A disabled switch still needs an accessible name -- otherwise a screen
+    // reader announces only "switch, off" with no indication of what it is.
+    expect(toggle.getAttribute("aria-label")).toBeTruthy();
+
+    toggle.click();
+    expect(calls).toEqual([]);
+  });
+
+  it("disables an enabled schedule and enables a disabled one", async () => {
+    const calls: ServiceCallRecord[] = [];
+    const sensor = baseSensor({
+      schedules: [
+        { id: "s1", time: "06:00:00", days: [0], duration: 600, enabled: true },
+        { id: "s2", time: "18:00:00", days: [0], duration: 600, enabled: false },
+      ],
+    });
+    const card = await mountCard({ "sensor.jardim_next_run": sensor }, calls);
+
+    const [enabled, disabled] = scheduleToggles(card);
+    expect(enabled.getAttribute("aria-checked")).toBe("true");
+    expect(disabled.getAttribute("aria-checked")).toBe("false");
+
+    enabled.click();
+    disabled.click();
+
+    expect(calls.map((c) => [c.service, c.data])).toEqual([
+      ["update_schedule", { id: "s1", enabled: false }],
+      ["update_schedule", { id: "s2", enabled: true }],
+    ]);
+    expect(calls.every((c) => c.domain === DOMAIN)).toBe(true);
+  });
+
+  it("names both toggles statically, leaving state to aria-checked", async () => {
+    const sensor = baseSensor({
+      schedules: [
+        { id: "s1", time: "06:30:00", days: [0], duration: 600, enabled: true },
+      ],
+    });
+    const card = await mountCard(
+      {
+        "sensor.jardim_next_run": sensor,
+        "switch.jardim_schedule_enabled": masterSwitch("on"),
+      },
+      [],
+    );
+
+    // For role="switch" the accessible name must describe WHAT is controlled;
+    // the on/off state is conveyed by aria-checked. A name that flips with the
+    // state (or describes the action) contradicts the announced state.
+    expect(masterToggle(card).getAttribute("aria-label")).toBe(
+      "Agendamento automático",
+    );
+    expect(scheduleToggles(card)[0].getAttribute("aria-label")).toBe(
+      "Horário das 06:30",
+    );
+  });
+
+  it("gives every custom button an explicit type so none defaults to submit", async () => {
+    const card = await mountCard(
+      {
+        "sensor.jardim_next_run": baseSensor(),
+        "switch.jardim_schedule_enabled": masterSwitch("on"),
+      },
+      [],
+    );
+
+    const buttons = Array.from(
+      card.shadowRoot?.querySelectorAll("button") ?? [],
+    );
+    expect(buttons.length).toBeGreaterThan(0);
+    expect(
+      buttons.filter((b) => b.getAttribute("type") !== "button"),
+    ).toEqual([]);
   });
 });
