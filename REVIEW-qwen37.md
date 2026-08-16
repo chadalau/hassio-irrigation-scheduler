@@ -1,161 +1,154 @@
-# REVIEW-qwen37.md — Auditoria Adversarial Independente
+# REVIEW-qwen37.md — Revisão adversarial independente
 
-**Data**: 2026-08-13  
-**Escopo**: Working tree completo (backend, frontend, testes)  
-**Modelo**: qwen3.7-max  
-**Status final**: **APROVADO**
+**Data:** 2026-08-16  
+**Modelo:** qwen3.7-max (opencode-go/qwen3.7-max)  
+**Escopo:** Working tree do repositório `watergaia` (mudanças não commitadas + contexto completo)
 
 ---
 
-## Arquivos Revisados
+## Arquivos revisados
 
-### Backend (`custom_components/irrigation_scheduler/`)
-| Arquivo | Linhas |
+### Backend (sem mudanças no working tree)
+- `custom_components/irrigation_scheduler/__init__.py`
+- `custom_components/irrigation_scheduler/scheduler.py`
+- `custom_components/irrigation_scheduler/config_flow.py`
+- `custom_components/irrigation_scheduler/store.py`
+- `custom_components/irrigation_scheduler/next_run.py`
+- `custom_components/irrigation_scheduler/schedules.py`
+- `custom_components/irrigation_scheduler/sensor.py`
+- `custom_components/irrigation_scheduler/switch.py`
+- `custom_components/irrigation_scheduler/binary_sensor.py`
+- `custom_components/irrigation_scheduler/const.py`
+- `custom_components/irrigation_scheduler/manifest.json` (modificado)
+
+### Frontend fonte (modificados)
+- `frontend-src/src/card.ts`
+- `frontend-src/src/styles.ts`
+- `frontend-src/src/utils.ts`
+- `frontend-src/src/types.ts`
+- `frontend-src/src/const.ts`
+- `frontend-src/src/editor.ts`
+
+### Frontend testes
+- `frontend-src/tests/card.test.ts`
+- `frontend-src/tests/editor.test.ts`
+- `frontend-src/tests/utils.test.ts`
+
+### Backend testes
+- `tests/test_next_run.py`
+- `tests/test_schedules.py`
+- `tests/integration/` (todos os arquivos)
+
+### Bundle buildado
+- `custom_components/irrigation_scheduler/frontend/irrigation-schedule-card.js` (modificado)
+
+### Documentação
+- `FUNCTIONS.md` (modificado)
+- `plano.md` (não rastreado, apenas inspecionado)
+
+---
+
+## Achados por severidade
+
+### CRITICO
+Nenhum.
+
+### ALTO
+Nenhum.
+
+### MEDIO
+Nenhum.
+
+### BAIXO
+
+#### B1. `type="button"` ausente nos toggles customizados e no botão "Adicionar horário"
+- **Arquivo:** `frontend-src/src/card.ts:374-384` (master toggle), `card.ts:635-645` (schedule toggle), `card.ts:523-531` (add-schedule-button)
+- **Cenário:** Os três `<button>` customizados não possuem `type="button"`. O default HTML é `type="submit"`. Embora o card Lovelace não esteja dentro de um `<form>` (portanto sem risco real de submit acidental), o botão "Parar" na watering-bar (`card.ts:471-478`) já possui `type="button"` corretamente, criando uma inconsistência interna.
+- **Evidência:** Inspeção do código. O `watering-stop-button` tem `type="button"` (linha 473), mas os toggles e o add-schedule-button não.
+- **Impacto:** Nenhum risco funcional no contexto atual (sem form), mas é uma boa prática de acessibilidade/robustez. Se no futuro o card for envolvido em um form (improvável mas possível em dashboards customizados), os botões sem `type="button"` disparariam submit.
+- **Sugestão:** Adicionar `type="button"` aos três botões para consistência com o `watering-stop-button`.
+
+#### B2. `aria-label` inconsistente entre master toggle e schedule toggle
+- **Arquivo:** `frontend-src/src/card.ts:379` (master) vs `card.ts:640` (schedule)
+- **Cenário:** O master toggle usa `aria-label` descritivo do **estado** (`"Agendamento ativo"` / `"Agendamento desativado"`), enquanto o schedule toggle usa `aria-label` descritivo da **ação** (`"Desativar horário"` / `"Ativar horário"`). Ambos são válidos segundo WAI-ARIA para `role="switch"`, mas a inconsistência dentro do mesmo card pode confundir usuários de screen reader.
+- **Evidência:**
+  - Master (linha 379): `aria-label=${switchOn ? "Agendamento ativo" : "Agendamento desativado"}`
+  - Schedule (linha 640): `aria-label=${schedule.enabled ? "Desativar horário" : "Ativar horário"}`
+- **Impacto:** Funcionalmente correto em ambos os casos. Inconsistência de UX menor.
+- **Sugestão:** Padronizar em um dos dois estilos. O estilo "ação" (schedule toggle) é mais informativo para o usuário de screen reader, pois comunica o que acontecerá ao clicar.
+
+### INFORMATIVO
+
+#### I1. Version bump 0.11.1 → 0.11.6 (pulo de 4 versões intermediárias)
+- **Arquivo:** `custom_components/irrigation_scheduler/manifest.json:16`
+- **Cenário:** A versão pulou de 0.11.1 para 0.11.6 sem passar por 0.11.2–0.11.5. Não há código que dependa de versão específica (sem migração baseada em versão, sem check de versão mínima da integração). O HACS usa o version apenas para exibição e comparação de updates.
+- **Impacto:** Inofensivo. O número de versão é arbitrário e não afeta funcionalidade.
+
+#### I2. `plano.md` não rastreado pelo git
+- **Arquivo:** `plano.md` (untracked)
+- **Cenário:** Documento de planejamento para uma integração-irmã `light_scheduler`. Contém apenas decisões de design e uma matriz de reuso/adaptação. Nenhum código.
+- **Impacto:** Nenhum. Não afeta o código atual. Pode ser adicionado ao `.gitignore` ou commitado como documento de referência.
+
+#### I3. `CheckableElement` interface ainda é usada (não é dead code)
+- **Arquivo:** `frontend-src/src/card.ts:50-52`
+- **Cenário:** Com a remoção de `ha-switch` e a mudança de assinatura de `_toggleMaster`/`_toggleScheduleEnabled`, a interface `CheckableElement` poderia parecer dead code. No entanto, ela ainda é usada em `_toggleDay` (linha 1718) para os checkboxes de dias da semana.
+- **Impacto:** Nenhum. A interface está correta e em uso.
+
+---
+
+## Falsos positivos (suspeitas testadas e refutadas)
+
+### FP1. `aria-checked` com boolean no Lit
+- **Suspeita:** `aria-checked=${switchOn}` (boolean) poderia renderizar como `aria-checked=""` (boolean attribute) em vez de `aria-checked="true"`/`aria-checked="false"`.
+- **Refutação:** O Lit converte boolean para string via `String(value)` quando usado como atributo sem o prefixo `?`. `String(true)` = `"true"`, `String(false)` = `"false"`. Isso é o comportamento correto para ARIA attributes (que aceitam "true", "false", "mixed"). Confirmado pela documentação do Lit e pelo comportamento do `AttributePart`.
+
+### FP2. Keyboard support ausente nos toggles
+- **Suspeita:** Os `<button role="switch">` customizados poderiam não responder a Enter/Space.
+- **Refutação:** O `<button>` nativo já responde a Enter e Space por padrão, disparando o evento `click`. O handler `@click` é disparado automaticamente por keyboard. O `:focus-visible` está presente no CSS (styles.ts:415-418). Acessibilidade keyboard está correta.
+
+### FP3. Thumb do toggle cortado pelo `overflow: hidden` do `ha-card`
+- **Suspeita:** O thumb (20x20px) transborda do track (34x12px) e poderia ser cortado pelo `overflow: hidden` do `ha-card` (styles.ts:5).
+- **Refutação:** O `.schedule-row` tem `padding: 2px 10px` e está dentro de `.schedules` (margin-top: 8px) dentro de `.card-body` (padding: 0 16px 16px). O thumb transborda 4px verticalmente, mas o conteúdo adjacente (schedule-info com duas linhas de texto) é mais alto que 20px, então o grid row height acomoda o thumb. O `overflow: hidden` do `ha-card` não corta o thumb porque ele está bem dentro dos limites do card.
+
+### FP4. Testes de frontend quebrados pela mudança de assinatura
+- **Suspeita:** Os testes poderiam estar usando a assinatura antiga de `_toggleMaster(entity, ev)` ou `_toggleScheduleEnabled(schedule, ev)`.
+- **Refutação:** `grep` por `_toggleMaster`, `_toggleScheduleEnabled` e `ha-switch` nos testes retornou zero resultados. Os testes não exercitam esses métodos diretamente. Todos os 155 testes de frontend passaram.
+
+### FP5. Bundle dessincronizado com o fonte
+- **Suspeita:** O bundle buildado poderia estar dessincronizado com o fonte TypeScript.
+- **Refutação:** `npm run build` regenerou o bundle e o `git diff --stat` permaneceu idêntico (300 ++++++++++++++-------), confirmando que o bundle no working tree já refletia o fonte atual.
+
+---
+
+## Testes executados
+
+| Comando | Resultado |
 |---|---|
-| `__init__.py` | 507 |
-| `scheduler.py` | 2060 |
-| `store.py` | 183 |
-| `next_run.py` | 205 |
-| `schedules.py` | 65 |
-| `config_flow.py` | 467 |
-| `const.py` | 126 |
-| `sensor.py` | 160 |
-| `switch.py` | 73 |
-| `binary_sensor.py` | 81 |
+| `& "$env:TEMP\opencode\irr-venv\Scripts\python.exe" -m pytest tests/test_next_run.py tests/test_schedules.py -q` | **36 passed** em 0.03s |
+| `& "$env:TEMP\opencode\ha-venv\Scripts\python.exe" -m pytest tests -q` | **176 passed** em 15.04s |
+| `npm run typecheck` (frontend-src) | **OK** (sem erros) |
+| `npm run test` (frontend-src) | **155 passed** (3 test files, 706ms) |
+| `npm run build` (frontend-src) | **OK** (bundle regenerado com sucesso) |
+| `& "$env:TEMP\opencode\ha-venv\Scripts\python.exe" -m compileall -q custom_components` | **OK** (sem erros de compilação) |
 
-### Frontend (`frontend-src/src/`)
-| Arquivo | Linhas |
+**Total: 367 testes, 0 falhas.**
+
+---
+
+## Status final
+
+### APROVADO
+
+Nenhum achado CRITICO, ALTO ou MEDIO. Dois achados BAIXO (inconsistências menores de `type="button"` e `aria-label`) e três INFORMATIVOS (version bump, plano.md, CheckableElement). Todos os testes passam (backend puro, backend HA, frontend typecheck, frontend unit tests, build). O bundle está em sincronia com o fonte. A inversão de estado nos toggles está correta. A acessibilidade (role/aria-checked/focus-visible/keyboard) está funcionalmente correta.
+
+---
+
+## Resumo dos achados
+
+| Severidade | Descrição |
 |---|---|
-| `card.ts` | 1682 |
-| `editor.ts` | 86 |
-| `utils.ts` | 572 |
-| `types.ts` | 143 |
-| `styles.ts` | 720 |
-| `const.ts` | 9 |
-
-### Testes
-| Arquivo | Linhas |
-|---|---|
-| `tests/test_next_run.py` | 250 |
-| `tests/test_schedules.py` | 126 |
-| `tests/pure_loader.py` | 32 |
-| `frontend-src/tests/editor.test.ts` | 143 |
-| `frontend-src/tests/card.test.ts` | 1302 |
-| `frontend-src/tests/utils.test.ts` | 728 |
-
----
-
-## Verificação do Achado da Rodada Anterior
-
-### Editor visual: `_valueChanged` lendo `ev.detail.value` (CORRIGIDO)
-
-**Arquivo**: `frontend-src/src/editor.ts:71-85`
-
-O código atual lê corretamente `ev.detail.value` (a config completa emitida pelo `ha-form`):
-
-```typescript
-private _valueChanged(ev: CustomEvent): void {
-    const value = (ev.detail as { value?: Record<string, unknown> } | undefined)
-      ?.value;
-    if (!value || !this._config) { return; }
-    const config = { ...this._config, ...value } as CardConfig;
-    this.dispatchEvent(new CustomEvent("config-changed", { ... }));
-}
-```
-
-O comentário nas linhas 63-69 documenta explicitamente a correção. O teste de regressão em `editor.test.ts:66-112` dispara um evento `value-changed` com `{ detail: { value: { entity: ..., compact: true } } }` e verifica que `config-changed` é disparado com a config mergeada corretamente. **Teste passa.**
-
----
-
-## Achados por Severidade
-
-### CRÍTICO — Nenhum
-
-### ALTO — Nenhum
-
-### MÉDIO — Nenhum
-
-### BAIXO (observações, não bugs)
-
-#### 1. Duplo dispatch em `_deduct_reservoir_volume` → `async_options_updated`
-- **Arquivo**: `scheduler.py:757-771` + `scheduler.py:1198-1199`
-- **Cenário**: `_deduct_reservoir_volume` atualiza `entry.options`, o que dispara o update listener → `async_options_updated()` → `_reschedule_next()` + `_async_dispatch_update()`. Imediatamente depois, `_async_finish_run` chama os mesmos métodos novamente nas linhas 1198-1199.
-- **Impacto**: Operações idempotentes; sem efeito funcional. Custo desprezível (um cancel+rearm de timer e um dispatcher_send extra).
-- **Classificação**: Ineficiência cosmética, não bug.
-
-#### 2. `_suppress_state_listener = True` redundante na linha 974
-- **Arquivo**: `scheduler.py:974`
-- **Cenário**: No caminho de abort do turn_on failure, `_suppress_state_listener` já está `True` (setado na linha 958). A reatribuição na linha 974 é redundante.
-- **Impacto**: Nenhum. O `finally` da linha 982 e o `finally` externo da linha 992 garantem cleanup correto.
-- **Classificação**: Redundância inofensiva.
-
----
-
-## Falsos Positivos Percebidos
-
-| # | Descrição | Por que não é bug |
-|---|---|---|
-| 1 | `_async_register_services` chamado em `async_setup` E `async_setup_entry` | Guard `has_service` na linha 336 torna idempotente |
-| 2 | `setdefault("store", RuntimeStore(hass))` com entries concorrentes | `setdefault` é atômico sob GIL; uma única instância é criada |
-| 3 | `_stringAttr` retorna `undefined` para string vazia `""` | Callers fazem `?? ""` convertendo de volta; `""` significa "não configurado" |
-| 4 | `_async_finish_run` com `turn_off=False` no stop externo | O target já está confirmed-off; enviar turn_off seria desnecessário |
-| 5 | `_openAdd` seta `_formTime` para `"00:00"` (meia-noite) | Meia-noite é um horário válido; backend aceita |
-| 6 | `_callService` mira o sensor entity, não o switch/target | Backend resolve sensor → config_entry → scheduler via `_async_resolve_schedulers` |
-| 7 | Grace period = 0 quando `_active_duration` é None | `_active_duration` é sempre setado antes de grace ser consultado; o `else 0` é defensivo |
-
----
-
-## Testes Executados
-
-| Suite | Comando | Resultado |
-|---|---|---|
-| Backend puro | `python -m pytest tests/test_next_run.py tests/test_schedules.py -q` | **35 passed** (0.03s) |
-| Backend HA | `python -m pytest tests -q` | **164 passed** (14.64s) |
-| Frontend typecheck | `npm run typecheck` | **OK** (tsc --noEmit sem erros) |
-| Frontend testes | `npm run test` | **153 passed** (3 test files, 792ms) |
-| Frontend build | `npm run build` | **OK** (rollup criou irrigation-schedule-card.js em 842ms) |
-
-**Total: 352 testes, 0 falhas.**
-
----
-
-## Análise de Segurança e Robustez
-
-### Pontos fortes verificados
-- **Run generation token** (`_run_id`): previne re-entrância e callbacks stale em todo o lifecycle
-- **pH gate fail-safe**: sensor ausente/indisponível/inválido/NaN bloqueia a rega (nunca rega às cegas)
-- **Store lock**: `asyncio.Lock` único protege read-modify-write de todas as zonas concorrentes
-- **`async_update_entry` atômico**: previne race entre `_async_store_mark_actuated` e `_async_store_mark_history_logged`
-- **Restart recovery**: distingue run que realmente regou (`actuated=True`) de run que crashou antes do turn_on
-- **`history_logged`**: previne double-logging e double-deduction no recovery
-- **DST policy**: spring-forward gap skip + fall-back fold=0 documentados e testados
-- **Malformed days**: degrade gracefully (TypeError-free) via `isinstance(days, (list, tuple))`
-- **Frontend entity contract**: card valida `switch_entity_id`/`binary_sensor_entity_id` antes de renderizar
-- **Backend error surfacing**: dialog/settings mantêm painel aberto e mostram erro do backend
-- **Editor `config-changed`**: corrigido e coberto por teste de regressão
-
-### Cobertura de testes adversariais
-- Malformed days (string, int, None, dict, float) → degrade gracefully
-- DST spring-forward/fall-back
-- Schedule id immutability through create→update
-- Backend error propagation to frontend (dialog stays open)
-- Entity contract validation (foreign sensor rejected)
-- pH gate cross-field validation (min > max blocked)
-- R2 independent reservoir fields
-- Reservoir volume/estimate/refill UI
-
----
-
-## Sugestões (não bloqueantes)
-
-1. **Considerar extrair a constante `grace` para um método helper** — a expressão `min(ACTUATION_GRACE, self._active_duration) if self._active_duration is not None else 0` aparece em dois lugares (scheduler.py:1005 e 1614-1618). Um helper `_current_grace()` eliminaria a duplicação.
-
-2. **Considerar log level `DEBUG` para o duplo dispatch** — se o duplo `_reschedule_next()`/`_async_dispatch_update()` via `_deduct_reservoir_volume` → options listener se tornar mensurável em perfis de uso intenso, um flag `_in_finish_run` poderia suprimir o dispatch redundante.
-
----
-
-## Status Final
-
-### **APROVADO**
-
-O achado da rodada anterior (editor visual `_valueChanged` lendo `ev.detail.name` em vez de `ev.detail.value`) foi **corrigido corretamente** e está coberto por teste de regressão. Nenhum achado crítico, alto ou médio foi identificado. O código apresenta defesa em profundidade consistente, com comentários explicando o racional de cada decisão de design. Todos os 352 testes passam.
+| BAIXO | `type="button"` ausente em 3 botões customizados (toggles + add-schedule-button); inconsistente com o watering-stop-button que já o possui |
+| BAIXO | `aria-label` do master toggle descreve o estado, enquanto o schedule toggle descreve a ação — inconsistência de UX |
+| INFORMATIVO | Version bump 0.11.1 → 0.11.6 (pulo de 4 versões intermediárias, inofensivo) |
+| INFORMATIVO | `plano.md` não rastreado (documento de planejamento para light_scheduler, sem código) |
+| INFORMATIVO | `CheckableElement` interface ainda em uso (não é dead code) |

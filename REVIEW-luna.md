@@ -1,42 +1,59 @@
-# Auditoria adversarial — estado atual
+# Revisão adversarial — 16/08/2026 — gpt-5.6-luna (opencode-go/gpt-5.6-luna)
 
 ## Arquivos revisados
 
-- Backend: `custom_components/irrigation_scheduler/{__init__.py,binary_sensor.py,config_flow.py,const.py,next_run.py,scheduler.py,schedules.py,sensor.py,store.py,switch.py}`.
-- Frontend fonte: `frontend-src/src/{card.ts,const.ts,editor.ts,styles.ts,types.ts,utils.ts}`.
-- Testes backend: `tests/test_next_run.py`, `tests/test_schedules.py` e todos os testes em `tests/integration/`.
-- Testes frontend: `frontend-src/tests/{card.test.ts,editor.test.ts,utils.test.ts}`.
-- Estado considerado: working tree atual, incluindo alterações não commitadas e arquivos não rastreados relevantes.
+- Backend: `custom_components/irrigation_scheduler/` — `scheduler.py`, `__init__.py`, `config_flow.py`, `store.py`, `next_run.py`, `schedules.py`, `sensor.py`, `switch.py`, `binary_sensor.py`, `const.py`, `manifest.json`, além do bundle em `frontend/irrigation-schedule-card.js`.
+- Frontend fonte: `frontend-src/src/` — `card.ts`, `editor.ts`, `utils.ts`, `styles.ts`, `types.ts`, `const.ts`.
+- Testes: `tests/` (incluindo `tests/integration/`) e `frontend-src/tests/`.
+- Documentação alterada: `FUNCTIONS.md`.
+- `plano.md` foi identificado como documento não rastreado e não foi tratado como código de produção/teste.
 
 ## Achados por severidade
 
-### MÉDIO — entrada de histórico malformada pode derrubar a renderização do card
+### CRITICO
 
-- **Arquivo/linha:** `frontend-src/src/card.ts:1311-1317` e `frontend-src/src/utils.ts:567-570`.
-- **Cenário/evidência:** `_isHistoryRun` aceita qualquer `started_at` string, sem verificar se ela é uma data parseável. Quando a ocorrência de hoje já passou, `scheduleStatusToday` chama `dayKey(new Date(entry.started_at), timeZone)` para cada entrada. Uma string inválida produz `Invalid Date`; `Intl.DateTimeFormat(...).format()` lança `RangeError`. Esse erro sobe para `render()`, que substitui o card inteiro pela mensagem genérica de falha. Uma entidade com atributo `history` parcialmente corrompido (migração, restore ou estado publicado por outro componente) portanto torna o card inutilizável, embora `groupHistoryByDay` já trate esse mesmo tipo de entrada como descartável.
-- **Correção sugerida:** validar `Date.parse(started_at)` em `_isHistoryRun`, ou filtrar entradas inválidas antes de `dayKey`/proteger `scheduleStatusToday` contra datas inválidas. Adicionar teste de renderização com `history: [{ started_at: "not-a-date", ... }]` e horário de hoje já passado.
+Nenhum achado reproduzível.
 
-Não foram identificados outros problemas reproduzíveis de severidade alta ou crítica no backend, frontend ou testes revisados.
+### ALTO
 
-## Verificação do achado da rodada anterior
+Nenhum achado reproduzível.
 
-**Corrigido.** `frontend-src/src/editor.ts:64-77` lê `ev.detail.value`, trata o valor como a configuração completa, mescla com `_config` e dispara `config-changed`. O teste de regressão em `frontend-src/tests/editor.test.ts:66-112` usa o formato real `{ value: ... }` e passou. Não há leitura de `ev.detail.name` no caminho.
+### MEDIO
 
-## Falsos positivos percebidos
+Nenhum achado reproduzível.
 
-- O `build` atualiza o bundle gerado em `custom_components/irrigation_scheduler/frontend/`; a alteração já fazia parte do estado do working tree e não foi interpretada como defeito independente do código-fonte.
-- O retorno `null` de `scheduleStatusToday` após um horário passado sem histórico não é tratado como erro: é deliberadamente estado ambíguo, conforme o contrato documentado.
-- `unavailable`/`unknown` não encerra nem inicia cegamente uma rega; isso é comportamento fail-safe intencional, não uma falha de detecção.
-- A ausência de detecção de um alvo que já estava ligado antes do setup não foi classificada como defeito: a implementação rastreia mudanças externas observadas pelo listener, não faz inferência retroativa sobre um estado anterior.
+### BAIXO
+
+Nenhum achado reproduzível.
+
+### INFORMATIVO
+
+- `custom_components/irrigation_scheduler/manifest.json:16` — a versão foi de `0.11.1` para `0.11.6`, pulando `0.11.2`–`0.11.5`. Não há evidência de defeito funcional; o salto é válido se essas versões não foram publicadas. Confirmar apenas a intenção no processo de release.
+- `frontend-src/src/card.ts:374-391,632-647` — os toggles próprios usam `button` nativo, `role="switch"`, `aria-checked`, foco visível e click; ativação por Enter/Espaço é fornecida pelo elemento nativo. Não foi encontrado handler/teste usando a assinatura antiga com `Event`.
+- `custom_components/irrigation_scheduler/frontend/irrigation-schedule-card.js` foi regenerado por `npm run build`; a saída contém as novas classes, marcação ARIA e inversões de estado correspondentes ao fonte.
+
+Não foram encontrados defeitos reproduzíveis no backend, nos gates de pH/EC, rastreamento de reservatório, histórico, ativação externa, desligamento automático ou integração do card com os serviços.
+
+## Falsos positivos
+
+- Suspeita de inversão incorreta do master switch: refutada por inspeção do fluxo `switchOn` → `_toggleMaster(entity, switchOn)` e pela chamada `currentlyOn ? "turn_off" : "turn_on"` em `frontend-src/src/card.ts:1552-1562`.
+- Suspeita de inversão incorreta do schedule: refutada por `enabled: !schedule.enabled` em `frontend-src/src/card.ts:1581-1583`.
+- Suspeita de incompatibilidade residual da assinatura antiga: busca no fonte, bundle, testes e documentação não encontrou chamadas `_toggleMaster(..., Event)` ou `_toggleScheduleEnabled(..., Event)`.
+- Suspeita de bundle fora de sincronia: `npm run build` terminou com sucesso e regenerou `custom_components/irrigation_scheduler/frontend/irrigation-schedule-card.js` a partir do fonte atual.
+- Suspeita de regressão de acessibilidade por troca de `ha-switch`: os controles são botões nativos focáveis, têm `role="switch"`, `aria-checked`, `aria-label`, estado disabled quando aplicável e estilo `:focus-visible`.
 
 ## Testes executados
 
-- `$env:TEMP\opencode\irr-venv\Scripts\python.exe -m pytest tests/test_next_run.py tests/test_schedules.py -q` — **35 passed**.
-- `$env:TEMP\opencode\ha-venv\Scripts\python.exe -m pytest tests -q` — **164 passed**.
-- `cd frontend-src; npm run typecheck` — **passou**.
-- `cd frontend-src; npm run test` — **153 passed (3 arquivos)**.
-- `cd frontend-src; npm run build` — **passou**.
+| Comando | Resultado |
+|---|---|
+| `& "$env:TEMP\opencode\irr-venv\Scripts\python.exe" -m pytest tests/test_next_run.py tests/test_schedules.py -q` | **PASS** — 36 passed |
+| `& "$env:TEMP\opencode\ha-venv\Scripts\python.exe" -m pytest tests -q` | **PASS** — 176 passed |
+| `npm run typecheck` (em `frontend-src`) | **PASS** — `tsc --noEmit` |
+| `npm run test` (em `frontend-src`) | **PASS** — 3 arquivos, 155 testes |
+| `npm run build` (em `frontend-src`) | **PASS** — bundle criado em `custom_components/irrigation_scheduler/frontend/irrigation-schedule-card.js` |
+| `& "$env:TEMP\opencode\ha-venv\Scripts\python.exe" -m compileall -q custom_components` | **PASS** — sem saída/erro |
+| `git diff --check` | **PASS** — sem erro de whitespace |
 
 ## Status final
 
-**PRECISA DE ALTERAÇÃO**
+**APROVADO**

@@ -1,165 +1,161 @@
-# REVIEW-deepseek.md — Revisão adversarial independente (2026-08-13)
+# REVIEW-deepseek.md — Revisão adversarial independente (2026-08-16)
 
-Revisão adversarial completa do working tree de `watergaia` (estado atual, com
-alterações não commitadas). Backend, frontend e testes revisados. Nenhum
-arquivo de produção nem de teste foi alterado. O `npm run build` regenerou
-`custom_components/irrigation_scheduler/frontend/irrigation-schedule-card.js`
-(artefato buildado — etapa obrigatória da bateria de testes do frontend). Não
-foram lidos nem alterados os demais `REVIEW-*.md`.
+Modelo: `opencode-go/deepseek-v4-flash`. Revisão completa do working tree atual de `watergaia`,
+com foco nas mudanças não commitadas. Nenhum arquivo de produção nem de teste do repositório
+foi alterado (o `npm run build` regenerou o bundle — etapa obrigatória da bateria — e o
+resultado é byte-idêntico ao que já estava no working tree). Não foram lidos nem alterados os
+demais `REVIEW-*.md`.
 
 ---
 
 ## Arquivos revisados
 
 **Backend (`custom_components/irrigation_scheduler/`):**
-`__init__.py`, `scheduler.py`, `schedules.py`, `next_run.py`, `store.py`,
-`switch.py`, `sensor.py`, `binary_sensor.py`, `config_flow.py`, `const.py`,
-`manifest.json`, `frontend/irrigation-schedule-card.js` (bundle buildado).
+`__init__.py`, `scheduler.py`, `schedules.py`, `next_run.py`, `store.py`, `switch.py`,
+`sensor.py`, `binary_sensor.py`, `config_flow.py`, `const.py`, `manifest.json`,
+`frontend/irrigation-schedule-card.js` (bundle buildado).
 
 **Frontend (`frontend-src/`):**
-`src/card.ts`, `src/editor.ts`, `src/utils.ts`, `src/styles.ts`, `src/types.ts`,
-`src/const.ts`, `tests/card.test.ts`, `tests/editor.test.ts`, `tests/utils.test.ts`,
-`package.json`, `tsconfig.json`, `vitest.config.ts`, `rollup.config.mjs`, `smoke.mjs`.
+`src/card.ts`, `src/editor.ts`, `src/utils.ts`, `src/styles.ts`, `src/types.ts`, `src/const.ts`,
+`tests/card.test.ts`, `tests/editor.test.ts`, `tests/utils.test.ts`, `rollup.config.mjs`,
+`smoke.mjs`, `vitest.config.ts`, `package.json`.
 
-**Testes:**
-`tests/test_next_run.py`, `tests/test_schedules.py`, `tests/pure_loader.py`,
-`tests/integration/conftest.py` e os 15 arquivos `test_*.py` de integração.
+**Testes:** `tests/test_next_run.py`, `tests/test_schedules.py`, `tests/pure_loader.py` e os
+arquivos em `tests/integration/`.
 
-**Diff não commitado analisado:**
-`const.py` (SOURCE_EXTERNAL), `manifest.json` (v0.10.0), `scheduler.py`
-(ativação externa + warnings de falha de atuação), `card.ts`/`utils.ts`
-(ícones/status "done/pending/warning", fonte externa), `styles.ts`,
-`tests/card.test.ts`/`utils.test.ts`, `tests/integration/test_external_activation.py`
-e `test_target_failure_warnings.py` (novos, não commitados).
-
----
-
-## Verificação do achado da rodada anterior (editor visual)
-
-**FIXED — `frontend-src/src/editor.ts:71-85`**
-`_valueChanged` agora lê `ev.detail.value` (a config completa consolidada pelo
-`ha-form`), não mais `ev.detail.name`:
-
-```ts
-const value = (ev.detail as { value?: Record<string, unknown> } | undefined)?.value;
-...
-const config = { ...this._config, ...value } as CardConfig;
-this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, ... }));
-```
-
-- Evidência no bundle buildado: `_valueChanged(t){const e=t.detail?.value;if(!e||!this._config)return;...dispatchEvent(new CustomEvent("config-changed",...))}`.
-- Teste de regressão: `frontend-src/tests/editor.test.ts:66-112` (dispara
-  `value-changed` com `detail.value` e assere `config-changed` com a config
-  mesclada) — passa.
-- Sem remanescentes de `detail.name` em código (apenas em comentários
-  explicativos nas linhas 65-67).
+**Diff não commitado analisado (`git diff` + `git status`):**
+`FUNCTIONS.md` (docs), `frontend-src/src/card.ts` (+99/−…), `frontend-src/src/styles.ts`
+(+179/−…), `manifest.json` (0.11.1 → 0.11.6), bundle `irrigation-schedule-card.js`
+(reconstruído a partir do fonte), e `plano.md` (não rastreado — documento da integração-irmã
+`light_scheduler`, sem código).
 
 ---
 
 ## Achados por severidade
 
-### BAIXA
+### CRITICO
 
-**1. `scheduler.py:1102-1170` (+ `1183-1195`) — corrida pode descartar o histórico de uma rega concluída**
+Nenhum achado reproduzível.
 
-Cenário: em `_async_finish_run`, dentro do laço de retry do turn_off há
-`if self._run_id != run_id: return` (linhas 1107-1113, e novamente em 1165-1170)
-**antes** de `_async_log_history` (linhas 1183-1195). Se uma rega NOVA começa
-durante o backoff de 1s (`_async_wait(TURN_OFF_RETRY_DELAY)`) — p.ex. uma
-ativação externa que executa `_async_start_external_run` e faz `self._run_id += 1`
-— o `return` dispara e a rega antiga (que já tinha `history_actuated = True`
-capturado) NUNCA é gravada no histórico, nem deduz o reservatório.
+### ALTO
 
-Evidência: a proteção é deliberada e correta para não desligar o alvo da rega
-nova, mas a perda de histórico/dedução é efeito colateral não tratado. Janela
-estreita (~1s por tentativa), requer evento externo/novo disparo exatamente nessa
-janela. Nenhum teste cobre o interleave.
+Nenhum achado reproduzível.
 
-**2. `scheduler.py:1614-1622` — rega externa interrompida dentro do ACTUATION_GRACE é ignorada e super-contabilizada**
+### MEDIO
 
-Cenário: para uma rega EXTERNA o alvo já está confirmadamente ON quando o
-rastreio começa. Se o próprio ator desliga o alvo dentro dos primeiros 15s
-(`grace = min(ACTUATION_GRACE, _active_duration)`), o evento é tratado como
-"eco obsoleto" e ignorado. A rega segue "Regando" até `finishes_at`, registrando
-no histórico a duração COMPLETA de `default_duration` e deduzindo o volume
-inteiro do reservatório, embora o dispositivo tenha ficado desligado quase o
-tempo todo. Para regas agendadas a justificativa de "echo assíncrono" é forte;
-para regas externas (alvo confirmadamente ON) a mesma regra é fraca. Sem teste
-cobrindo "external run parado dentro do grace".
+1. **Sem cobertura de teste para o novo toggle (a mudança de comportamento mais visível do diff).**
+   - **Arquivo/linha:** `frontend-src/src/card.ts:374-391` (master toggle), `:635-645`
+     (schedule toggle), `:1552-1583` (handlers).
+   - **Cenário/evidência:** A suite frontend (155 testes) não exercita em nenhum ponto
+     `_toggleMaster`, `_toggleScheduleEnabled`, os atributos `role="switch"`/`aria-checked`
+     nem o mapeamento clique→serviço (`grep` em `frontend-src/tests` retorna zero referências).
+     A inversão de estado é **correta** (verificado empiricamente — veja Testes executados),
+     mas nada no repositório a protege contra regressão. Ex.: se alguém reintroduzir
+     `currentlyOn ? "turn_on" : "turn_off"`, nenhum teste falha.
+   - **Correção sugerida:** adicionar testes de card para: clique no master toggle ON → espera
+     `switch.turn_off` no `switch_entity_id`; clique em OFF → `switch.turn_on`; clique no toggle
+     de horário habilitado → `update_schedule {id, enabled:false}`; horário desabilitado →
+     `enabled:true`; e renderização do botão `disabled` quando `switch_entity_id` é `null`.
 
-**3. `scheduler.py:577-588` (`async_setup`) — detecção de ativação externa é só orientada a eventos; sem varredura no boot**
+### BAIXO
 
-Cenário: o listener de estado é registrado em `async_setup`, mas nada verifica se
-o alvo JÁ está atuado na inicialização. Se o dispositivo foi ligado enquanto o HA
-estava fora (ou antes de o listener ser registrado) e nenhum evento de mudança
-disparar depois, a rega externa nunca é rastreada → sem stop timer. Com nenhum
-horário configurado, o dispositivo pode permanecer ligado indefinidamente. O HA
-dispara eventos de estado restaurado no boot, mas o listener só os captura se
-estiver registrado a tempo — depende da ordem de carregamento das plataformas
-(instável). Destoa da filosofia fail-safe do restante do código (retenção do
-store, turn_off defensivo).
+2. **Alvo de toque/clique do `.toggle` é pequeno (34×12px).**
+   - **Arquivo/linha:** `frontend-src/src/styles.ts:368-379`.
+   - **Cenário/evidência:** o botão tem 34×12px com thumb de 20px; a área clicável é exatamente
+     o botão (sem padding/touch-target invisível). O `ha-switch` substituído mantinha um
+     touch-target material maior. Não há estado `:hover`/`:active` (só `:focus-visible`).
+     Em telas touch isso é um alvo pequeno (~12px de altura efetiva na vertical).
+   - **Correção sugerida:** aumentar a altura efetiva via `::before` esticado ou
+     `padding-block` transparente mantendo a estética de trilho de 12px; adicionar feedback
+     `:hover`.
+
+3. **`text-overflow: ellipsis` em `.watering-left` é CSS morto (não gera reticências).**
+   - **Arquivo/linha:** `frontend-src/src/styles.ts:281-288` + `card.ts:452-459`.
+   - **Cenário/evidência:** `.watering-left` é um flex container com `overflow: hidden`,
+     `text-overflow: ellipsis`, `white-space: nowrap`, mas o texto ("Regando · ativada no
+     dispositivo") está dentro de um `<span>` filho que é um flex item — a elipse só seria
+     desenhada se o overflow acontecesse no próprio container. Na prática o texto longo é
+     cortado sem reticências em cards estreitos. Cosmético (o `overflow:hidden` evita quebra
+     de layout), sem impacto funcional.
+   - **Correção sugerida:** aplicar `overflow:hidden; text-overflow:ellipsis;
+     white-space:nowrap` ao `<span>` interno (ou dar `min-width:0` a ele).
 
 ### INFORMATIVO
 
-**4. `card.ts:966-979` — validação cruzada de pH no cliente é mais fraca que a do backend**
+4. **`manifest.json`: versão 0.11.1 → 0.11.6 (pulo de 0.11.2..0.11.5).**
+   - **Arquivo/linha:** `custom_components/irrigation_scheduler/manifest.json:16`.
+   - **Cenário/evidência:** `git log -p` do manifest e `git tag` confirmam que não existem
+     commits nem tags `v0.11.2`..`v0.11.5` neste repositório (histórico: 0.1.0 → 0.2.0 →
+     0.8.1 → 0.8.2 → 0.11.0 → 0.11.1 → 0.11.6 no working tree). O pulo é inofensivo em runtime
+     (a versão do manifest não valida nada no carregamento). Para HACS, porém, o "instalado"
+     (0.11.6) pode superar o "último release" se não houver tag/release v0.11.6 no GitHub —
+     usuários não receberiam aviso de atualização. Recomenda-se publicar o release v0.11.6
+     junto com este commit (ou usar a próxima versão de release real).
 
-Cenário: o guard `ph_min > ph_max` só dispara quando AMBOS parseiam como válidos
-(`validMin && validMax`). Se o usuário editar apenas `ph_min` acima do `ph_max`
-já armazenado (o campo não tocado exibe o valor atual mas parseia NaN), o
-frontend envia e o backend rejeita com `ServiceValidationError` claro, exibido no
-painel. Aceitável (o erro aparece), mas o cliente poderia validar contra os
-valores exibidos (fallback). Mesmo comportamento para R2.
+5. **Inconsistência de `aria-label` entre os dois toggles.**
+   - **Arquivo/linha:** `card.ts:378-379` (master: descreve ESTADO "Agendamento ativo/
+     desativado") vs `card.ts:639-640` (schedule: descreve AÇÃO "Desativar horário/Ativar
+     horário"). Ambas as convenções são aceitáveis em ARIA, mas a mistura no mesmo card é
+     incoerente para leitores de tela.
 
-**5. `card.ts:352-357` — comentário desatualizado/ambíguo sobre a linha R2**
+6. **Nota de ambiente: escritas concorrentes no working tree durante a revisão.**
+   - `REVIEW-luna.md` e `REVIEW-qwen37.md` apareceram como "modified" entre duas execuções de
+     `git status` — outro(s) processo(s) de revisão gravando em paralelo. Não afeta código: os
+     arquivos revisados (`card.ts`, `styles.ts`, `manifest.json`, `FUNCTIONS.md`, bundle)
+     tiveram diffs byte-estáveis durante toda a sessão (verificado por `git diff --stat`
+     repetido).
 
-O comentário afirma que a linha R2 é "puramente do pH/EC próprio, sem fallback de
-reservatório", mas `_renderReservoirRow` recebe `volumeBadge/estimateBadge/
-refillButton` também para R2 (e o teste `card.test.ts:601-616` assere o badge de
-volume repetido nas duas linhas). O comentário refere-se à *visibilidade* da
-linha (`showRow2` ignora `reservoir_volume_l`), não ao conteúdo dos badges — lê-se
-como contradição.
-
-**6. `frontend-src/smoke.mjs:62` — asserção de smoke morta**
-
-`text.includes("Seg") && text.includes("Qua")` sempre imprime `false` (o card
-renderiza iniciais de um caractere, não as abreviações completas). É meramente
-informativa (não entra na condição de `throw`), mas engana quem lê a saída.
+7. **`plano.md` (não rastreado): os mockups usam a linguagem visual ANTIGA do card de água**
+   (botões circulares "+"/"▶", linhas 89 e 107-111), enquanto `FUNCTIONS.md:752` afirma que o
+   novo `.add-schedule-button` (largura total) "empresta o visual do irmão light_scheduler".
+   Contradição só entre documentos (o plano é apenas documento, sem código); vale alinhar o
+   mockup quando o light_scheduler for implementado.
 
 ---
 
-## Falsos positivos (testados e refutados)
+## Falsos positivos (suspeitas testadas e refutadas)
 
-**1. `config_flow.py:67-70` e `300-303` — suspeita de crash `float(None)` em campo pH opcional**
-
-Suspeita: `float(user_input.get(CONF_PH_MIN, DEFAULT_PH_MIN))` lançaria TypeError
-se o usuário limpasse o campo numérico (selector BOX envia `null`). **REFUTADO
-empiricamente**: no runtime HA 2026.2.3 suportado, `data_entry_flow` valida o
-`user_input` contra o `data_schema` ANTES de chamar o step handler; `None` para o
-NumberSelector é rejeitado com `InvalidData` (o form é re-renderizado com erro de
-validação) e o `float(None)` nunca é alcançado. Probe executado com o harness HA
-(1 teste passou; arquivo temporário em `%TEMP%\opencode`, removido).
-
-**2. `card.ts:358-415` — reservatório/refill sumiriam se apenas R2 fosse configurado**
-
-Checado: `showRow1 = Boolean(phEntityId || ecEntityId || reservoirVolume > 0)`
-faz a linha R1 renderizar os controles de volume mesmo sem pH/EC R1; o design se
-sustenta (badge de volume aparece na linha R1). Não é bug.
+- **`CheckableElement` virou dead code com a remoção do `ha-switch`.** Refutado:
+  `frontend-src/src/card.ts:1718` ainda o usa em `_toggleDay` para os checkboxes de dias.
+- **Assinatura antiga ainda usada em algum teste/caller.** Refutado: `grep` por
+  `_toggleMaster|_toggleScheduleEnabled|ha-switch` em fonte, bundle, testes e docs retorna só
+  as chamadas novas. Nenhum teste usa `(ev: Event)`.
+- **Inversão de estado do toggle master/schedule incorreta.** Refutado empiricamente:
+  harness descartável com 7 casos (veja Testes) — ON→`switch.turn_off`, OFF→`switch.turn_on`,
+  schedule habilitado→`update_schedule enabled:false`, desabilitado→`enabled:true`, botão
+  `disabled` com `switch_entity_id: null`, barra "restantes"/dot/botão Parar→`stop`. 7/7 OK.
+- **`aria-checked` com booleano renderiza atributo inválido.** Refutado: Lit converte
+  `aria-checked=${false}` para `aria-checked="false"` (string), confirmado por
+  `getAttribute("aria-checked")` no harness.
+- **Bundle fora de sincronia com o fonte.** Refutado: `npm run build` produziu hash SHA-256
+  idêntico ao bundle já presente no working tree (idempotente), e `node smoke.mjs` passa
+  ("SMOKE OK") — o CI já valida isso com `git diff --exit-code` no bundle.
+- **`_toggleMaster` pode crashar com switch ausente.** Refutado: o closure captura o objeto da
+  entidade no momento do render (snapshot), e sem entidade o card renderiza o botão `disabled`
+  (sem handler). Primeira tentativa de teste falhou por BUG DO HARNESS (removi a chave
+  `switch_entity_id` do contrato, o que cai no erro de config; o contrato real é `null`).
+- **Pulo de versão 0.11.1→0.11.6 causa quebra de runtime.** Refutado: nada consome a versão em
+  runtime; impacto limitado a release management do HACS (achado 4).
 
 ---
 
 ## Testes executados
 
-| Suite | Comando | Resultado |
+| # | Comando | Resultado |
 |---|---|---|
-| Backend puro | `%TEMP%\opencode\irr-venv\Scripts\python.exe -m pytest tests/test_next_run.py tests/test_schedules.py -q` | **35 passed** |
-| Backend HA | `%TEMP%\opencode\ha-venv\Scripts\python.exe -m pytest tests -q` | **164 passed** (rodado 2×, antes e depois do build do frontend) |
-| Frontend typecheck | `npm run typecheck` | **ok** (sem erros) |
-| Frontend tests | `npm run test` | **153 passed** (3 arquivos) |
-| Frontend build | `npm run build` | **ok** (bundle regenerado) |
-| Smoke do bundle | `node smoke.mjs` | **SMOKE OK** (registro do card/editor, render, watering, config-error) |
-| Probe adversarial (config flow pH=None) | pytest + harness HA, arquivo temporário | **1 passed** (refuta o crash; arquivo removido) |
+| 1 | `& "$env:TEMP\opencode\irr-venv\Scripts\python.exe" -m pytest tests/test_next_run.py tests/test_schedules.py -q` | **36 passed** (0.03s) |
+| 2 | `& "$env:TEMP\opencode\ha-venv\Scripts\python.exe" -m pytest tests -q` | **176 passed** (14.8s) |
+| 3 | `npm run typecheck` (em `frontend-src`) | **OK** (tsc --noEmit, sem erros) |
+| 4 | `npm run test` (em `frontend-src`) | **155 passed** (3 arquivos) |
+| 5 | `npm run build` (em `frontend-src`) | **OK** — bundle regenerado, byte-idêntico ao do working tree (SHA-256 estável) |
+| 6 | `node smoke.mjs` (em `frontend-src`) | **SMOKE OK** |
+| 7 | `& "$env:TEMP\opencode\ha-venv\Scripts\python.exe" -m compileall -q custom_components` | **OK** |
+| 8 | Harness adversarial temporário (fora do repo, em `%TEMP%\opencode`, removido ao final) | **7/7 passed** — toggles, aria, disabled, watering bar, stop |
+| 9 | `ruff check custom_components tests` | **Não executado** — `ruff` indisponível no ambiente (CI `.github/workflows/quality.yml` o executa: `ruff check custom_components tests`) |
 
-Total: **352 testes passando** (35 + 164 + 153) + typecheck/build/smoke OK.
+Nota: todos os comandos rodaram a partir do working tree sem modificar arquivos de produção.
+O único arquivo alterado durante a bateria foi o bundle (regenerado por `npm run build`), que
+permaneceu byte-idêntico ao estado pré-existente do working tree.
 
 ---
 
@@ -167,14 +163,11 @@ Total: **352 testes passando** (35 + 164 + 153) + typecheck/build/smoke OK.
 
 **APROVADO**
 
-- O achado da rodada anterior (editor visual lendo `ev.detail.name` em vez de
-  `ev.detail.value`) está **CORRIGIDO**, verificado no fonte, no bundle buildado
-  e no teste de regressão dedicado.
-- Nenhum achado de severidade alta ou média confirmada; os 4 achados de
-  severidade baixa e os 3 informativos não bloqueiam a aprovação.
-- Todas as suítes passam no working tree atual, incluindo as duas novas
-  suítes de integração não commitadas (ativação externa e warnings de falha de
-  atuação).
-- Recomendações para rodadas futuras (não bloqueantes): tratar a corrida que
-  descarta histórico em `_async_finish_run`, reconsiderar o grace para regas
-  externas, e considerar uma varredura de alvo já atuado no boot.
+A mudança é correta e segura para merge: a inversão de estado dos dois toggles está certa
+(verificada empiricamente), a acessibilidade básica (role/aria-checked/aria-label/focus/
+keyboard via `<button>` nativo/disabled) está presente, nenhum teste usa a assinatura antiga,
+o bundle está em sincronia com o fonte e toda a bateria passa (36 + 176 + typecheck + 155 +
+build idempotente + smoke + compileall). Nenhum achado de severidade CRITICO ou ALTO. Os
+achados restantes são de baixa severidade ou informativos (destaques: adicionar cobertura de
+teste para o comportamento dos toggles — MEDIO — e alinhar o release/tag `v0.11.6` no GitHub
+para o HACS).
