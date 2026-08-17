@@ -1520,3 +1520,77 @@ describe("IrrigationScheduleCard enable toggles", () => {
     ).toEqual([]);
   });
 });
+
+describe("IrrigationScheduleCard summary block", () => {
+  function summary(card: IrrigationScheduleCard) {
+    const root = card.shadowRoot;
+    return {
+      headline: root?.querySelector(".summary-main strong")?.textContent?.trim(),
+      next: root
+        ?.querySelector(".summary-main span")
+        ?.textContent?.replace(/\s+/g, " ")
+        .trim(),
+      statLabel: root?.querySelector(".summary-stat span")?.textContent?.trim(),
+      statValue: root
+        ?.querySelector(".summary-stat strong")
+        ?.textContent?.trim(),
+    };
+  }
+
+  // The count is taken against the WALL CLOCK, not the sensor's state, so the
+  // fixtures derive today's index instead of hardcoding a weekday -- otherwise
+  // the suite would pass or fail depending on the day it runs.
+  const today = (new Date().getDay() + 6) % 7;
+  const otherDay = (today + 3) % 7;
+
+  it("counts today's enabled schedules and shows the next run", async () => {
+    const sensor = baseSensor({
+      schedules: [
+        { id: "a", time: "06:00:00", days: [today], duration: 600, enabled: true },
+        { id: "b", time: "18:00:00", days: [today], duration: 600, enabled: true },
+        { id: "c", time: "20:00:00", days: [otherDay], duration: 600, enabled: true },
+        { id: "d", time: "22:00:00", days: [today], duration: 600, enabled: false },
+      ],
+    });
+    const card = await mountCard({ "sensor.jardim_next_run": sensor }, []);
+
+    // Only a + b: c is another weekday, d is disabled.
+    expect(summary(card).headline).toBe("2 horários hoje");
+    expect(summary(card).next).toContain("Próxima:");
+  });
+
+  it("uses the singular form for exactly one schedule", async () => {
+    const sensor = baseSensor({
+      schedules: [
+        { id: "a", time: "06:00:00", days: [today], duration: 600, enabled: true },
+      ],
+    });
+    const card = await mountCard({ "sensor.jardim_next_run": sensor }, []);
+    expect(summary(card).headline).toBe("1 horário hoje");
+  });
+
+  it("shows the average daily volume when a flow rate is configured", async () => {
+    const sensor = baseSensor({
+      flow_rate_lph: 60,
+      number_of_pots: 1,
+      schedules: [
+        {
+          id: "a",
+          time: "06:00:00",
+          days: [0, 1, 2, 3, 4, 5, 6],
+          duration: 3600,
+          enabled: true,
+        },
+      ],
+    });
+    const card = await mountCard({ "sensor.jardim_next_run": sensor }, []);
+    // 60 L/h * 1 h * 1 pot, every day -> 60 L/day.
+    expect(summary(card).statLabel).toBe("Volume/dia");
+    expect(summary(card).statValue).toBe("60 L");
+  });
+
+  it("hides the volume stat entirely when no flow rate is configured", async () => {
+    const card = await mountCard({ "sensor.jardim_next_run": baseSensor() }, []);
+    expect(card.shadowRoot?.querySelector(".summary-stat")).toBeNull();
+  });
+});

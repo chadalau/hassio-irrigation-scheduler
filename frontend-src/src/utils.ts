@@ -126,6 +126,11 @@ export function formatVolume(liters: number): string {
     return "0 L";
   }
   const rounded = Math.round(liters * 100) / 100;
+  // A positive-but-tiny volume would otherwise print "0 L" next to a
+  // reservoir estimate derived from the same non-zero number.
+  if (rounded === 0 && liters > 0) {
+    return "< 0.01 L";
+  }
   return `${rounded} L`;
 }
 
@@ -533,16 +538,6 @@ function secondsSinceMidnightInZone(date: Date, timeZone?: string): number {
   return hour * 3600 + part("minute") * 60 + part("second");
 }
 
-/** Today's status for one schedule, IN ``timeZone`` (the HA server's zone):
- * ``"warning"`` when its last scheduled firing didn't complete normally
- * (``hasWarning``, from ``schedule_warnings`` -- takes priority over
- * everything else), ``"pending"`` when today is one of its days and the
- * time hasn't arrived yet, ``"done"`` when today is one of its days, the
- * time has passed, and a matching ``history`` entry (same ``schedule_id``,
- * same calendar day) confirms it ran -- or ``null`` when none of that
- * applies (today isn't an active day, the schedule is disabled, or the
- * time already passed with no warning AND no matching history entry, which
- * is ambiguous rather than a known-good or known-bad state). */
 /**
  * How many enabled schedules are set to run on today's weekday (in the
  * zone's own timezone). Drives the card's summary headline; unlike
@@ -564,6 +559,16 @@ export function countSchedulesToday(
   ).length;
 }
 
+/** Today's status for one schedule, IN ``timeZone`` (the HA server's zone):
+ * ``"warning"`` when its last scheduled firing didn't complete normally
+ * (``hasWarning``, from ``schedule_warnings`` -- takes priority over
+ * everything else), ``"pending"`` when today is one of its days and the
+ * time hasn't arrived yet, ``"done"`` when today is one of its days, the
+ * time has passed, and a matching ``history`` entry (same ``schedule_id``,
+ * same calendar day) confirms it ran -- or ``null`` when none of that
+ * applies (today isn't an active day, the schedule is disabled, or the
+ * time already passed with no warning AND no matching history entry, which
+ * is ambiguous rather than a known-good or known-bad state). */
 export function scheduleStatusToday(
   schedule: Schedule,
   hasWarning: boolean,

@@ -629,7 +629,7 @@ export class IrrigationScheduleCard extends LitElement {
             <button
               class="metric ph-metric ${phStatusClass}"
               type="button"
-              title="Ver histórico do pH (reservatório ${reservoirNumber})"
+              title=${label ? `Ver histórico do pH (reservatório ${reservoirNumber})` : "Ver histórico do pH"}
               @click=${() => this._openMoreInfo(phEntityId)}
             >
               <ha-icon icon="mdi:flask"></ha-icon>
@@ -649,7 +649,7 @@ export class IrrigationScheduleCard extends LitElement {
             <button
               class="metric ec-metric"
               type="button"
-              title="Ver histórico da EC (reservatório ${reservoirNumber})"
+              title=${label ? `Ver histórico da EC (reservatório ${reservoirNumber})` : "Ver histórico da EC"}
               @click=${() => this._openMoreInfo(ecEntityId)}
             >
               <ha-icon icon="mdi:lightning-bolt"></ha-icon>

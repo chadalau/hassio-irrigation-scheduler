@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  countSchedulesToday,
   allDaysLabel,
   averageDailyVolumeL,
   dayInitials,
@@ -573,6 +574,11 @@ describe("formatVolume", () => {
     expect(formatVolume(5)).toBe("5 L");
     expect(formatVolume(0.5)).toBe("0.5 L");
     expect(formatVolume(12.345)).toBe("12.35 L");
+    // A positive volume that rounds to zero must not read as a flat "0 L":
+    // the reservoir estimate beside it is computed from the same non-zero
+    // number and would contradict it.
+    expect(formatVolume(0.0044)).toBe("< 0.01 L");
+    expect(formatVolume(0)).toBe("0 L");
   });
 
   it("handles non-finite input", () => {
@@ -733,5 +739,48 @@ describe("allDaysLabel / isAllDays", () => {
 
   it("always labels in Portuguese", () => {
     expect(allDaysLabel()).toBe("Todos os dias");
+  });
+});
+
+describe("countSchedulesToday", () => {
+  // 2026-08-17T09:00:00Z is a Monday in UTC -> weekday index 0.
+  const monday = "2026-08-17T09:00:00Z";
+
+  it("counts only schedules whose days include today's weekday", () => {
+    const schedules = [
+      schedule({ id: "a", days: [0] }),
+      schedule({ id: "b", days: [1, 2] }),
+      schedule({ id: "c", days: [0, 3] }),
+    ];
+    expect(countSchedulesToday(schedules, monday, "UTC")).toBe(2);
+  });
+
+  it("ignores disabled schedules", () => {
+    const schedules = [
+      schedule({ id: "a", days: [0] }),
+      schedule({ id: "b", days: [0], enabled: false }),
+    ];
+    expect(countSchedulesToday(schedules, monday, "UTC")).toBe(1);
+  });
+
+  it("counts a schedule whose time already passed -- it asks about the calendar, not history", () => {
+    // 23:00 on an every-day schedule, read at 09:00: still "on today's list".
+    expect(
+      countSchedulesToday([schedule({ time: "23:00:00" })], monday, "UTC"),
+    ).toBe(1);
+  });
+
+  it("resolves the weekday in the given timezone, not the browser's", () => {
+    // 2026-08-17T02:00Z is still Sunday (index 6) in Sao Paulo (UTC-3).
+    const schedules = [schedule({ id: "sun", days: [6] })];
+    expect(countSchedulesToday(schedules, "2026-08-17T02:00:00Z", "UTC")).toBe(0);
+    expect(
+      countSchedulesToday(schedules, "2026-08-17T02:00:00Z", "America/Sao_Paulo"),
+    ).toBe(1);
+  });
+
+  it("returns 0 for an empty list or an unparseable timestamp", () => {
+    expect(countSchedulesToday([], monday, "UTC")).toBe(0);
+    expect(countSchedulesToday([schedule()], "not-a-date", "UTC")).toBe(0);
   });
 });

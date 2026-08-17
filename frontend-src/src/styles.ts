@@ -30,6 +30,7 @@ export const cardStyles = css`
   .zone-icon {
     width: 32px;
     height: 32px;
+    flex-shrink: 0;
     display: grid;
     place-items: center;
     border-radius: 50%;
@@ -84,17 +85,10 @@ export const cardStyles = css`
     --mdc-icon-size: 20px;
   }
 
-  .status {
-    flex-shrink: 0;
-  }
-
-  .zone-icon {
-    flex-shrink: 0;
-  }
-
   /* Outlined chip rather than a filled pill: the state reads as a label on
      the card, not as a button competing with the toggle beside it. */
   .status {
+    flex-shrink: 0;
     height: 24px;
     padding: 0 8px;
     display: inline-flex;
@@ -345,12 +339,6 @@ export const cardStyles = css`
     margin: 11px 16px 10px;
   }
 
-  .card-body .section-divider {
-    /* .card-body already has its own 16px side padding: no extra inset. */
-    margin-left: 0;
-    margin-right: 0;
-  }
-
   .history-dialog {
     width: min(90vw, 440px);
     max-height: 80vh;
@@ -510,11 +498,6 @@ export const cardStyles = css`
     color: var(--w-blue);
     font-size: 11px;
     cursor: pointer;
-  }
-
-  .watering-stop-button:disabled {
-    opacity: 0.6;
-    cursor: default;
   }
 
   .watering-stop-button ha-icon {
