@@ -452,6 +452,7 @@ export class IrrigationScheduleCard extends LitElement {
         </div>
 
         ${this._renderSettings(
+          this._zoneName(sensor),
           defaultDurationSec,
           flowRate,
           numberOfPots,
@@ -772,6 +773,7 @@ export class IrrigationScheduleCard extends LitElement {
   }
 
   private _renderSettings(
+    zoneName: string,
     defaultDurationSec: number,
     flowRate: number,
     numberOfPots: number,
@@ -800,155 +802,178 @@ export class IrrigationScheduleCard extends LitElement {
           @keydown=${this._onDialogKeydown}
           @click=${(ev: Event) => ev.stopPropagation()}
         >
-          <div class="dialog-header" id="irrigation-settings-title">Configurar zona</div>
+          <div class="dialog-header">
+            <div>
+              <small>Configurações</small>
+              <h3 id="irrigation-settings-title">${zoneName}</h3>
+            </div>
+            <button
+              class="icon-button"
+              type="button"
+              title="Fechar"
+              aria-label="Fechar"
+              @click=${this._closeSettings}
+            >
+              <ha-icon icon="mdi:close"></ha-icon>
+            </button>
+          </div>
           <div class="dialog-body">
-        <div class="field">
-          <label>Duração padrão da rega (min)</label>
-          <input
-            type="number"
-            min="1"
-            .value=${this._settingsDefaultDuration || String(defaultDurationMin)}
-            @change=${this._onSettingsDefaultDurationChange}
-          />
-        </div>
-        <div class="field">
-          <label>Vazão por vaso (L/h)</label>
-          <input
-            type="number"
-            min="0"
-            .value=${this._settingsFlow || String(flowRate)}
-            @change=${this._onSettingsFlowChange}
-          />
-        </div>
-        <div class="field">
-          <label>Número de vasos</label>
-          <input
-            type="number"
-            min="0"
-            .value=${this._settingsPots || String(numberOfPots)}
-            @change=${this._onSettingsPotsChange}
-          />
-        </div>
-        <div class="field">
-          <label>Volume do reservatório (L)</label>
-          <input
-            type="number"
-            min="0"
-            .value=${this._settingsReservoir || String(reservoirVolume)}
-            @change=${this._onSettingsReservoirChange}
-          />
-        </div>
-        <div class="field">
-          <label>Sensor de pH R1 (opcional)</label>
-          <input
-            type="text"
-            list="ph-sensor-options"
-            placeholder="sensor.reservatorio_ph"
-            .value=${this._settingsPhEntityTouched ? this._settingsPhEntity : phEntityId}
-            @change=${this._onSettingsPhEntityChange}
-          />
-          <datalist id="ph-sensor-options">
-            ${this._sensorEntityIds().map((id) => html`<option value=${id}></option>`)}
-          </datalist>
-        </div>
-        <div class="field">
-          <label>Só regar (agendado) com pH R1 entre</label>
-          <div class="duration-row">
-            <div class="duration-part">
-              <input
-                type="number"
-                min="0"
-                max="14"
-                step="0.1"
-                .value=${this._settingsPhMin || String(phMin)}
-                @change=${this._onSettingsPhMinChange}
-              />
+            <div class="field-grid">
+              <div class="field">
+                <label>Duração padrão da rega (min)</label>
+                <input
+                  type="number"
+                  min="1"
+                  .value=${this._settingsDefaultDuration || String(defaultDurationMin)}
+                  @change=${this._onSettingsDefaultDurationChange}
+                />
+              </div>
+              <div class="field">
+                <label>Vazão por vaso (L/h)</label>
+                <input
+                  type="number"
+                  min="0"
+                  .value=${this._settingsFlow || String(flowRate)}
+                  @change=${this._onSettingsFlowChange}
+                />
+              </div>
+              <div class="field">
+                <label>Número de vasos</label>
+                <input
+                  type="number"
+                  min="0"
+                  .value=${this._settingsPots || String(numberOfPots)}
+                  @change=${this._onSettingsPotsChange}
+                />
+              </div>
+              <div class="field">
+                <label>Volume do reservatório (L)</label>
+                <input
+                  type="number"
+                  min="0"
+                  .value=${this._settingsReservoir || String(reservoirVolume)}
+                  @change=${this._onSettingsReservoirChange}
+                />
+              </div>
             </div>
-            <div class="duration-part">
+
+            <div class="dialog-divider"></div>
+            <h4 class="section-title">Reservatório 1</h4>
+            <div class="field">
+              <label>Sensor de pH (opcional)</label>
               <input
-                type="number"
-                min="0"
-                max="14"
-                step="0.1"
-                .value=${this._settingsPhMax || String(phMax)}
-                @change=${this._onSettingsPhMaxChange}
+                type="text"
+                list="ph-sensor-options"
+                placeholder="sensor.reservatorio_ph"
+                .value=${this._settingsPhEntityTouched ? this._settingsPhEntity : phEntityId}
+                @change=${this._onSettingsPhEntityChange}
               />
+              <datalist id="ph-sensor-options">
+                ${this._sensorEntityIds().map((id) => html`<option value=${id}></option>`)}
+              </datalist>
             </div>
+            <div class="field">
+              <label>Faixa de pH pra regar (agendado)</label>
+              <div class="duration-row">
+                <div class="duration-part">
+                  <input
+                    type="number"
+                    min="0"
+                    max="14"
+                    step="0.1"
+                    .value=${this._settingsPhMin || String(phMin)}
+                    @change=${this._onSettingsPhMinChange}
+                  />
+                </div>
+                <div class="duration-part">
+                  <input
+                    type="number"
+                    min="0"
+                    max="14"
+                    step="0.1"
+                    .value=${this._settingsPhMax || String(phMax)}
+                    @change=${this._onSettingsPhMaxChange}
+                  />
+                </div>
+              </div>
+            </div>
+            <div class="field">
+              <label>Sensor de EC (opcional, só exibição)</label>
+              <input
+                type="text"
+                list="ec-sensor-options"
+                placeholder="sensor.reservatorio_ec"
+                .value=${this._settingsEcEntityTouched ? this._settingsEcEntity : ecEntityId}
+                @change=${this._onSettingsEcEntityChange}
+              />
+              <datalist id="ec-sensor-options">
+                ${this._sensorEntityIds().map((id) => html`<option value=${id}></option>`)}
+              </datalist>
+            </div>
+
+            <div class="dialog-divider"></div>
+            <h4 class="section-title">Reservatório 2 (opcional)</h4>
+            <div class="field">
+              <label>Sensor de pH (opcional)</label>
+              <input
+                type="text"
+                list="ph-sensor-options-2"
+                placeholder="sensor.reservatorio2_ph"
+                .value=${this._settingsPhEntity2Touched ? this._settingsPhEntity2 : phEntityId2}
+                @change=${this._onSettingsPhEntity2Change}
+              />
+              <datalist id="ph-sensor-options-2">
+                ${this._sensorEntityIds().map((id) => html`<option value=${id}></option>`)}
+              </datalist>
+            </div>
+            <div class="field">
+              <label>Faixa de pH pra regar (agendado)</label>
+              <div class="duration-row">
+                <div class="duration-part">
+                  <input
+                    type="number"
+                    min="0"
+                    max="14"
+                    step="0.1"
+                    .value=${this._settingsPhMin2 || String(phMin2)}
+                    @change=${this._onSettingsPhMin2Change}
+                  />
+                </div>
+                <div class="duration-part">
+                  <input
+                    type="number"
+                    min="0"
+                    max="14"
+                    step="0.1"
+                    .value=${this._settingsPhMax2 || String(phMax2)}
+                    @change=${this._onSettingsPhMax2Change}
+                  />
+                </div>
+              </div>
+            </div>
+            <div class="field">
+              <label>Sensor de EC (opcional, só exibição)</label>
+              <input
+                type="text"
+                list="ec-sensor-options-2"
+                placeholder="sensor.reservatorio2_ec"
+                .value=${this._settingsEcEntity2Touched ? this._settingsEcEntity2 : ecEntityId2}
+                @change=${this._onSettingsEcEntity2Change}
+              />
+              <datalist id="ec-sensor-options-2">
+                ${this._sensorEntityIds().map((id) => html`<option value=${id}></option>`)}
+              </datalist>
+            </div>
+
+            ${this._settingsError
+              ? html`<div class="form-error">${this._settingsError}</div>`
+              : ""}
           </div>
-        </div>
-        <div class="field">
-          <label>Sensor de EC R1 (opcional, só exibição)</label>
-          <input
-            type="text"
-            list="ec-sensor-options"
-            placeholder="sensor.reservatorio_ec"
-            .value=${this._settingsEcEntityTouched ? this._settingsEcEntity : ecEntityId}
-            @change=${this._onSettingsEcEntityChange}
-          />
-          <datalist id="ec-sensor-options">
-            ${this._sensorEntityIds().map((id) => html`<option value=${id}></option>`)}
-          </datalist>
-        </div>
-        <div class="field">
-          <label>Sensor de pH R2 (opcional, segundo reservatório)</label>
-          <input
-            type="text"
-            list="ph-sensor-options-2"
-            placeholder="sensor.reservatorio2_ph"
-            .value=${this._settingsPhEntity2Touched ? this._settingsPhEntity2 : phEntityId2}
-            @change=${this._onSettingsPhEntity2Change}
-          />
-          <datalist id="ph-sensor-options-2">
-            ${this._sensorEntityIds().map((id) => html`<option value=${id}></option>`)}
-          </datalist>
-        </div>
-        <div class="field">
-          <label>Só regar (agendado) com pH R2 entre</label>
-          <div class="duration-row">
-            <div class="duration-part">
-              <input
-                type="number"
-                min="0"
-                max="14"
-                step="0.1"
-                .value=${this._settingsPhMin2 || String(phMin2)}
-                @change=${this._onSettingsPhMin2Change}
-              />
-            </div>
-            <div class="duration-part">
-              <input
-                type="number"
-                min="0"
-                max="14"
-                step="0.1"
-                .value=${this._settingsPhMax2 || String(phMax2)}
-                @change=${this._onSettingsPhMax2Change}
-              />
-            </div>
-          </div>
-        </div>
-        <div class="field">
-          <label>Sensor de EC R2 (opcional, só exibição)</label>
-          <input
-            type="text"
-            list="ec-sensor-options-2"
-            placeholder="sensor.reservatorio2_ec"
-            .value=${this._settingsEcEntity2Touched ? this._settingsEcEntity2 : ecEntityId2}
-            @change=${this._onSettingsEcEntity2Change}
-          />
-          <datalist id="ec-sensor-options-2">
-            ${this._sensorEntityIds().map((id) => html`<option value=${id}></option>`)}
-          </datalist>
-        </div>
-        ${this._settingsError
-          ? html`<div class="form-error">${this._settingsError}</div>`
-          : ""}
-        <div class="dialog-actions">
-          <button type="button" class="dialog-cancel" @click=${this._closeSettings}>
-            Fechar
-          </button>
-          <button type="button" class="dialog-save" @click=${this._saveSettings}>Salvar</button>
-        </div>
+          <div class="dialog-actions">
+            <button type="button" class="dialog-cancel" @click=${this._closeSettings}>
+              Fechar
+            </button>
+            <button type="button" class="dialog-save" @click=${this._saveSettings}>Salvar</button>
           </div>
         </div>
       </div>
@@ -1293,7 +1318,7 @@ export class IrrigationScheduleCard extends LitElement {
     return html`
       <div class="overlay" @click=${this._closeDialog}>
         <div
-          class="dialog"
+          class="dialog schedule-dialog"
           role="dialog"
           aria-modal="true"
           aria-labelledby="irrigation-schedule-dialog-title"
@@ -1301,8 +1326,22 @@ export class IrrigationScheduleCard extends LitElement {
           @keydown=${this._onDialogKeydown}
           @click=${(ev: Event) => ev.stopPropagation()}
         >
-          <div class="dialog-header" id="irrigation-schedule-dialog-title">
-            ${this._editingId ? "Editar horário" : "Adicionar horário"}
+          <div class="dialog-header">
+            <div>
+              <small>Agenda automática</small>
+              <h3 id="irrigation-schedule-dialog-title">
+                ${this._editingId ? "Editar horário" : "Adicionar horário"}
+              </h3>
+            </div>
+            <button
+              class="icon-button"
+              type="button"
+              title="Fechar"
+              aria-label="Fechar"
+              @click=${this._closeDialog}
+            >
+              <ha-icon icon="mdi:close"></ha-icon>
+            </button>
           </div>
           <div class="dialog-body">
             <div class="field">
@@ -1312,23 +1351,6 @@ export class IrrigationScheduleCard extends LitElement {
                 .value=${this._formTime}
                 @change=${this._onTimeChanged}
               />
-            </div>
-            <div class="field">
-              <label>Dias da semana</label>
-              <div class="day-picker">
-                ${labels.map(
-                  (label, day) => html`
-                    <label class="day-option">
-                      <input
-                        type="checkbox"
-                        ?checked=${this._formDays.includes(day)}
-                        @change=${(ev: Event) => this._toggleDay(day, ev)}
-                      />
-                      <span>${label}</span>
-                    </label>
-                  `,
-                )}
-              </div>
             </div>
             <div class="field">
               <label>Duração</label>
@@ -1370,6 +1392,10 @@ export class IrrigationScheduleCard extends LitElement {
                 </div>
               </div>
             </div>
+            <div class="duration-preview">
+              <ha-icon icon="mdi:timer-outline"></ha-icon>
+              <span>Regará por <strong>${formatDuration(totalDurationSec)}</strong></span>
+            </div>
             ${volumeMl !== null
               ? html`
                   <div class="field">
@@ -1383,11 +1409,41 @@ export class IrrigationScheduleCard extends LitElement {
                   </div>
                 `
               : ""}
+            <fieldset class="day-fieldset">
+              <legend>Dias da semana</legend>
+              <div class="day-grid">
+                ${labels.map(
+                  (label, day) => html`
+                    <label>
+                      <input
+                        type="checkbox"
+                        ?checked=${this._formDays.includes(day)}
+                        @change=${(ev: Event) => this._toggleDay(day, ev)}
+                      />
+                      <span>${label}</span>
+                    </label>
+                  `,
+                )}
+              </div>
+            </fieldset>
             ${this._formError
-              ? html` <div class="form-error">${this._formError}</div> `
+              ? html`<div class="form-error">${this._formError}</div>`
               : ""}
           </div>
           <div class="dialog-actions">
+            ${this._editingId
+              ? html`
+                  <button
+                    class="delete-button"
+                    type="button"
+                    @click=${this._deleteEditingSchedule}
+                  >
+                    <ha-icon icon="mdi:trash-can-outline"></ha-icon>
+                    Excluir
+                  </button>
+                `
+              : ""}
+            <span class="dialog-actions-spacer"></span>
             <button type="button" class="dialog-cancel" @click=${this._closeDialog}>
               Cancelar
             </button>
@@ -1669,6 +1725,17 @@ export class IrrigationScheduleCard extends LitElement {
   private _deleteSchedule(schedule: Schedule): void {
     if (window.confirm(`Excluir o horário das ${formatTime(schedule.time)}?`)) {
       this._callService("remove_schedule", { id: schedule.id });
+    }
+  }
+
+  private _deleteEditingSchedule(): void {
+    if (!this._editingId) {
+      return;
+    }
+    if (window.confirm(`Excluir o horário das ${this._formTime}?`)) {
+      this._callService("remove_schedule", { id: this._editingId }).then(() => {
+        this._closeDialog();
+      });
     }
   }
 

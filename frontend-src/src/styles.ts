@@ -755,6 +755,33 @@ export const cardStyles = css`
     margin-bottom: 12px;
   }
 
+  /* Both the schedule dialog and the settings dialog use the same rich
+     header: an eyebrow, a title, and a close button -- shared here so a
+     third dialog can opt in without duplicating the rule. */
+  .schedule-dialog .dialog-header,
+  .settings-dialog .dialog-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .schedule-dialog .dialog-header small,
+  .settings-dialog .dialog-header small {
+    color: var(--secondary-text-color);
+    font-size: 10px;
+    font-weight: 400;
+  }
+
+  .schedule-dialog .dialog-header h3,
+  .settings-dialog .dialog-header h3 {
+    margin: 2px 0 0;
+    font-size: 18px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .dialog-body {
     display: flex;
     flex-direction: column;
@@ -773,6 +800,25 @@ export const cardStyles = css`
   .settings-dialog .dialog-body {
     overflow-y: auto;
     padding-right: 4px;
+  }
+
+  /* Pairs simple numeric fields two per row instead of one long column --
+     the settings dialog has nine fields; stacking them all singly reads as
+     an undifferentiated scroll. */
+  .field-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .field-grid .field {
+    min-width: 0;
+  }
+
+  .dialog-divider {
+    height: 1px;
+    margin: 2px 0;
+    background: var(--divider-color, rgba(127, 127, 127, 0.16));
   }
 
   .field {
@@ -800,11 +846,46 @@ export const cardStyles = css`
     color-scheme: dark;
   }
 
-  .day-picker {
+  .day-fieldset {
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .day-fieldset legend {
+    color: var(--secondary-text-color);
+    font-size: 11px;
+    padding: 0;
+  }
+
+  .day-grid {
+    margin-top: 7px;
     display: grid;
-    grid-template-columns: repeat(7, auto);
+    grid-template-columns: repeat(7, 1fr);
     gap: 4px;
-    justify-content: start;
+  }
+
+  .day-grid input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .day-grid span {
+    height: 31px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(127, 127, 127, 0.35);
+    border-radius: 5px;
+    color: var(--secondary-text-color);
+    font-size: 10px;
+    cursor: pointer;
+  }
+
+  .day-grid input:checked + span {
+    border-color: var(--w-blue);
+    color: var(--w-blue);
+    background: rgba(3, 169, 244, 0.1);
   }
 
   .duration-box {
@@ -861,6 +942,26 @@ export const cardStyles = css`
     color: var(--primary-text-color);
   }
 
+  .duration-preview {
+    padding: 8px 10px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    border-radius: 6px;
+    color: var(--secondary-text-color);
+    background: rgba(3, 169, 244, 0.08);
+    font-size: 10px;
+  }
+
+  .duration-preview ha-icon {
+    --mdc-icon-size: 17px;
+    color: var(--w-blue);
+  }
+
+  .duration-preview strong {
+    color: var(--primary-text-color);
+  }
+
   .duration-row {
     display: flex;
     gap: 8px;
@@ -891,25 +992,6 @@ export const cardStyles = css`
     flex-shrink: 0;
   }
 
-  /* ".field label" (0,1,1) outranks a bare ".day-option" (0,1,0), so the size
-     below never reached the screen until this selector was made specific. */
-  .field .day-option {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    font-size: 11px;
-    color: var(--secondary-text-color);
-    cursor: pointer;
-  }
-
-  .field .day-option input[type="checkbox"] {
-    width: 18px;
-    height: 18px;
-    accent-color: var(--primary-color, #03a9f4);
-    cursor: pointer;
-  }
-
   .dialog-actions {
     display: flex;
     justify-content: flex-end;
@@ -934,6 +1016,28 @@ export const cardStyles = css`
   .dialog-save {
     background: var(--primary-color, #03a9f4);
     color: var(--text-primary-color, #fff);
+  }
+
+  .dialog-actions-spacer {
+    flex: 1;
+  }
+
+  .dialog-actions .delete-button {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding-left: 0;
+    background: transparent;
+    color: var(--error-color);
+  }
+
+  .dialog-actions .delete-button ha-icon {
+    --mdc-icon-size: 16px;
+  }
+
+  .schedule-dialog .dialog-actions .dialog-cancel {
+    border: 1px solid rgba(127, 127, 127, 0.35);
+    background: transparent;
   }
 
   .form-error {
