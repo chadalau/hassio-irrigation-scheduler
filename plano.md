@@ -1,5 +1,24 @@
 # Light Scheduler — Plano
 
+> **SUPERADO — mantido só como referência histórica.** Este documento propunha construir
+> o `light_scheduler` do zero, reaproveitando a arquitetura da água. Ele já existe: repo
+> próprio `chadalau/hassio-light-scheduler`
+> (local em `C:\Users\jvito\OneDrive\Documentos\ChatGPT\Brightlight`, `v0.7.0` — a versão
+> publicada no GitHub está em `v0.6.0`, atrás da local). Não é uma pasta dentro deste
+> repositório: cada integração mora no seu próprio repo (ver decisão nº 4 abaixo, que este
+> parágrafo substitui).
+>
+> A implementação real também é mais rica do que o proposto aqui: monitora potência por
+> luz (`power_entity_id`, `total_power_w`), renderiza um tile por luz (grade `.lights-grid`,
+> não uma lista simples), tem intervalo de stagger configurável (0–300s) pra ligar/desligar
+> as luzes uma a uma em sequência, e o horário é guardado como **início + fim** (não
+> início + duração como na água — o card deriva a duração exibida a partir dos dois). As
+> decisões em aberto nº 1–3 abaixo foram resolvidas na prática pela implementação real, não
+> necessariamente do jeito sugerido aqui.
+>
+> O restyle do card da água (`irrigation_scheduler`, ver `FUNCTIONS.md`) usa esse card real
+> como referência visual — não este plano.
+
 Uma segunda integração, irmã da `irrigation_scheduler`, aplicando o mesmo motor de
 agendamento e a mesma linguagem visual do card à iluminação — sem reservatório, sem pH,
 com uma luz (ou grupo de luzes) no lugar da válvula.
@@ -166,9 +185,8 @@ a implementar.
    decisão já fechada foi "nunca desliga sozinha"; falta decidir se a barra ao vivo do
    card também deve refletir "alguém ligou pelo interruptor agora" (informativo, sem
    controle) ou se fica mesmo restrito ao diálogo de histórico.
-4. **Onde mora o código.** Proponho `custom_components/light_scheduler/` neste mesmo
-   repositório, ao lado do `irrigation_scheduler` — fácil de separar num repo HACS
-   próprio depois, se quiser.
+4. ~~**Onde mora o código.**~~ Respondido: repo próprio, não uma pasta aqui — ver o aviso
+   no topo do documento.
 
 ---
 
