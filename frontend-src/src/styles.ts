@@ -98,7 +98,6 @@ export const cardStyles = css`
     border-radius: 5px;
     font-size: 11px;
     font-weight: 600;
-    line-height: 1;
     white-space: nowrap;
   }
 
