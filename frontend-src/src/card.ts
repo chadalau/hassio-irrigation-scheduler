@@ -487,8 +487,6 @@ export class IrrigationScheduleCard extends LitElement {
                 <div class="metrics">
                   ${bothReservoirs
                     ? html`
-                        <div class="reservoir-column-title">Reservatório 1</div>
-                        <div class="reservoir-column-title">Reservatório 2</div>
                         ${this._renderPhMetric(1, phEntityId, phStatusClass, true) ||
                         html`<span></span>`}
                         ${this._renderPhMetric(2, phEntityId2, phStatusClass2, true) ||
@@ -635,10 +633,10 @@ export class IrrigationScheduleCard extends LitElement {
    * their own instead of using "" directly, or a sensor missing on one
    * reservoir shifts the OTHER reservoir's tiles out of their column (see
    * the `bothReservoirs` branch: pH1, pH2, EC1, EC2 must land in that exact
-   * order for the transposed grid to line up). `disambiguate` adds
-   * "(reservatório N)" to the tooltip only when a second reservoir is on
-   * screen -- with just one there is nothing to disambiguate, and the
-   * column title already says which one it is when there are two.
+   * order for the transposed grid to line up). `disambiguate` appends the
+   * reservoir number to both the visible label ("pH 2") and the tooltip
+   * only when a second reservoir is on screen -- with just one there is
+   * nothing to disambiguate.
    */
   private _renderPhMetric(
     reservoirNumber: 1 | 2,
@@ -660,7 +658,7 @@ export class IrrigationScheduleCard extends LitElement {
       >
         <ha-icon icon="mdi:flask"></ha-icon>
         <div class="metric-copy">
-          <small>pH</small>
+          <small>pH${disambiguate ? ` ${reservoirNumber}` : ""}</small>
           <strong>
             ${this._sensorBadgeText(phEntityId, "?", (value) =>
               formatSensorReading(value),
@@ -691,7 +689,7 @@ export class IrrigationScheduleCard extends LitElement {
       >
         <ha-icon icon="mdi:lightning-bolt"></ha-icon>
         <div class="metric-copy">
-          <small>EC</small>
+          <small>EC${disambiguate ? ` ${reservoirNumber}` : ""}</small>
           <strong>
             ${this._sensorBadgeText(ecEntityId, "?", (value, unit) =>
               formatSensorReading(value, unit),

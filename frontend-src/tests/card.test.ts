@@ -567,28 +567,23 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
     const ecTiles = card.shadowRoot?.querySelectorAll(".ec-metric");
     expect(phTiles).toHaveLength(2);
     expect(ecTiles).toHaveLength(2);
-    // With two reservoirs the column titles carry the disambiguation, so the
-    // tile labels themselves stay plain "pH"/"EC" -- no "R1"/"R2" suffix.
+    // With two reservoirs the tile label itself carries a plain number, not
+    // a separate "Reservatório 1"/"Reservatório 2" subtitle row.
     const label = (el: Element | undefined) =>
       el?.querySelector("small")?.textContent?.trim();
     const value = (el: Element | undefined) =>
       el?.querySelector("strong")?.textContent?.trim();
-    expect(label(phTiles?.[0])).toBe("pH");
-    expect(label(phTiles?.[1])).toBe("pH");
-    expect(label(ecTiles?.[0])).toBe("EC");
-    expect(label(ecTiles?.[1])).toBe("EC");
+    expect(label(phTiles?.[0])).toBe("pH 1");
+    expect(label(phTiles?.[1])).toBe("pH 2");
+    expect(label(ecTiles?.[0])).toBe("EC 1");
+    expect(label(ecTiles?.[1])).toBe("EC 2");
     expect(value(phTiles?.[0])).toBe("6");
     expect(value(phTiles?.[1])).toBe("6.4");
     expect(value(ecTiles?.[0])).toBe("800 µS/cm");
     expect(value(ecTiles?.[1])).toBe("1200 µS/cm");
-
-    const columnTitles = Array.from(
-      card.shadowRoot?.querySelectorAll(".reservoir-column-title") ?? [],
-    ).map((el) => el.textContent?.trim());
-    expect(columnTitles).toEqual(["Reservatório 1", "Reservatório 2"]);
   });
 
-  it("lays out reservoir 1 and reservoir 2 as side-by-side columns, titles first", async () => {
+  it("lays out reservoir 1 and reservoir 2 as side-by-side columns", async () => {
     const card = await mountCard(
       {
         "sensor.jardim_next_run": baseSensor({
@@ -603,26 +598,17 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
     const children = Array.from(
       card.shadowRoot?.querySelector(".metrics")?.children ?? [],
     );
-    // The grid is transposed by reservoir, not by sensor type: the two
-    // column-title cells fill row 0, then pH1/pH2 fill row 1 and EC1/EC2
-    // fill row 2 -- so each reservoir occupies one full column instead of
-    // one full row, per the "reservoir 2 as a column, not a row below" ask.
-    expect(children).toHaveLength(6);
-    expect(children.map((el) => el.className.split(" ")[0])).toEqual([
-      "reservoir-column-title",
-      "reservoir-column-title",
-      "metric",
-      "metric",
-      "metric",
-      "metric",
+    // The grid is transposed by reservoir, not by sensor type: pH1/pH2 fill
+    // row 0 and EC1/EC2 fill row 1, so each reservoir occupies one full
+    // column instead of one full row, per the "reservoir 2 as a column, not
+    // a row below" ask.
+    expect(children).toHaveLength(4);
+    expect(children.map((el) => el.className.split(" ")[1])).toEqual([
+      "ph-metric",
+      "ph-metric",
+      "ec-metric",
+      "ec-metric",
     ]);
-    expect(children.map((el) => el.textContent?.trim().slice(0, 14))).toEqual(
-      expect.arrayContaining(["Reservatório 1", "Reservatório 2"]),
-    );
-    const metricClasses = children
-      .slice(2)
-      .map((el) => el.className.split(" ")[1]);
-    expect(metricClasses).toEqual(["ph-metric", "ph-metric", "ec-metric", "ec-metric"]);
   });
 
   it("shows the reservoir level ONCE even with two reservoirs configured", async () => {
@@ -700,15 +686,12 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
     expect(card.shadowRoot?.querySelector(".reservoir-level")).not.toBeNull();
   });
 
-  it("shows the reservoir column titles only when both reservoirs are shown", async () => {
+  it("numbers the tile label only when both reservoirs are shown", async () => {
     const single = await mountCard(
       { "sensor.jardim_next_run": baseSensor({ ph_entity_id: "sensor.r1_ph" }) },
       [],
     );
-    expect(
-      single.shadowRoot?.querySelectorAll(".reservoir-column-title"),
-    ).toHaveLength(0);
-    // With one reservoir the tile label stays plain "pH" too.
+    // With one reservoir there is nothing to disambiguate: plain "pH".
     expect(
       single.shadowRoot?.querySelector(".ph-metric small")?.textContent?.trim(),
     ).toBe("pH");
@@ -722,10 +705,10 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
       },
       [],
     );
-    const titles = Array.from(
-      both.shadowRoot?.querySelectorAll(".reservoir-column-title") ?? [],
+    const labels = Array.from(
+      both.shadowRoot?.querySelectorAll(".ph-metric small") ?? [],
     ).map((el) => el.textContent?.trim());
-    expect(titles).toEqual(["Reservatório 1", "Reservatório 2"]);
+    expect(labels).toEqual(["pH 1", "pH 2"]);
   });
 
   it("_saveSettings sends R2 fields only when their inputs were touched", async () => {
