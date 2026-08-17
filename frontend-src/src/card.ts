@@ -767,12 +767,12 @@ export class IrrigationScheduleCard extends LitElement {
           </div>
         </div>
         <div class="schedule-actions">
-          <ha-icon-button title="Editar" aria-label="Editar horário" @click=${() => this._openEdit(schedule)}>
+          <button class="row-action" type="button" title="Editar" aria-label="Editar horário" @click=${() => this._openEdit(schedule)}>
             <ha-icon icon="mdi:pencil"></ha-icon>
-          </ha-icon-button>
-          <ha-icon-button title="Excluir" aria-label="Excluir horário" @click=${() => this._deleteSchedule(schedule)}>
-            <ha-icon icon="mdi:delete"></ha-icon>
-          </ha-icon-button>
+          </button>
+          <button class="row-action delete" type="button" title="Excluir" aria-label="Excluir horário" @click=${() => this._deleteSchedule(schedule)}>
+            <ha-icon icon="mdi:trash-can-outline"></ha-icon>
+          </button>
         </div>
       </div>
     `;

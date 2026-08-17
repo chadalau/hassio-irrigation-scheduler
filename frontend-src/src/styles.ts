@@ -694,12 +694,34 @@ export const cardStyles = css`
   .schedule-actions {
     display: flex;
     align-items: center;
+    gap: 1px;
   }
 
-  .schedule-actions ha-icon-button {
-    --mdc-icon-button-size: 18px;
-    --mdc-icon-size: 13px;
-    margin: 0 -3px;
+  .row-action {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    color: var(--secondary-text-color);
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .row-action:hover {
+    background: rgba(3, 169, 244, 0.14);
+    color: var(--w-blue);
+  }
+
+  .row-action.delete:hover {
+    background: rgba(255, 80, 80, 0.12);
+    color: var(--error-color);
+  }
+
+  .row-action ha-icon {
+    --mdc-icon-size: 15px;
   }
 
   .empty {
