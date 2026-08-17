@@ -373,6 +373,7 @@ export class IrrigationScheduleCard extends LitElement {
     // once on R1's row.
     const showRow1 = Boolean(phEntityId || ecEntityId || reservoirVolume > 0);
     const showRow2 = Boolean(phEntityId2 || ecEntityId2);
+    const bothReservoirs = showRow1 && showRow2;
     return html`
       <ha-card class=${compact ? "compact" : ""}>
         <div class="header">
@@ -484,24 +485,31 @@ export class IrrigationScheduleCard extends LitElement {
               <div class="card-body">
                 <h3 class="section-title">Reservatório</h3>
                 <div class="metrics">
-                  ${showRow1
-                    ? this._renderReservoirMetrics(
-                        showRow2 ? " R1" : "",
-                        1,
-                        phEntityId,
-                        phStatusClass,
-                        ecEntityId,
-                      )
-                    : ""}
-                  ${showRow2
-                    ? this._renderReservoirMetrics(
-                        showRow1 ? " R2" : "",
-                        2,
-                        phEntityId2,
-                        phStatusClass2,
-                        ecEntityId2,
-                      )
-                    : ""}
+                  ${bothReservoirs
+                    ? html`
+                        <div class="reservoir-column-title">Reservatório 1</div>
+                        <div class="reservoir-column-title">Reservatório 2</div>
+                        ${this._renderPhMetric(1, phEntityId, phStatusClass, true) ||
+                        html`<span></span>`}
+                        ${this._renderPhMetric(2, phEntityId2, phStatusClass2, true) ||
+                        html`<span></span>`}
+                        ${this._renderEcMetric(1, ecEntityId, true) || html`<span></span>`}
+                        ${this._renderEcMetric(2, ecEntityId2, true) || html`<span></span>`}
+                      `
+                    : html`
+                        ${showRow1
+                          ? html`
+                              ${this._renderPhMetric(1, phEntityId, phStatusClass, false)}
+                              ${this._renderEcMetric(1, ecEntityId, false)}
+                            `
+                          : ""}
+                        ${showRow2
+                          ? html`
+                              ${this._renderPhMetric(2, phEntityId2, phStatusClass2, false)}
+                              ${this._renderEcMetric(2, ecEntityId2, false)}
+                            `
+                          : ""}
+                      `}
                 </div>
                 ${reservoirVolume > 0
                   ? html`
@@ -621,54 +629,76 @@ export class IrrigationScheduleCard extends LitElement {
    * plain "pH"/"EC". Each tile stays a button so clicking it still opens
    * HA's native history dialog for that sensor.
    */
-  private _renderReservoirMetrics(
-    label: string,
+  /**
+   * One pH tile, or "" when this reservoir has no pH sensor -- callers in
+   * the two-reservoir grid must substitute an empty placeholder cell of
+   * their own instead of using "" directly, or a sensor missing on one
+   * reservoir shifts the OTHER reservoir's tiles out of their column (see
+   * the `bothReservoirs` branch: pH1, pH2, EC1, EC2 must land in that exact
+   * order for the transposed grid to line up). `disambiguate` adds
+   * "(reservatório N)" to the tooltip only when a second reservoir is on
+   * screen -- with just one there is nothing to disambiguate, and the
+   * column title already says which one it is when there are two.
+   */
+  private _renderPhMetric(
     reservoirNumber: 1 | 2,
     phEntityId: string,
     phStatusClass: string,
-    ecEntityId: string,
-  ): TemplateResult {
+    disambiguate: boolean,
+  ): TemplateResult | "" {
+    if (!phEntityId) {
+      return "";
+    }
     return html`
-      ${phEntityId
-        ? html`
-            <button
-              class="metric ph-metric ${phStatusClass}"
-              type="button"
-              title=${label ? `Ver histórico do pH (reservatório ${reservoirNumber})` : "Ver histórico do pH"}
-              @click=${() => this._openMoreInfo(phEntityId)}
-            >
-              <ha-icon icon="mdi:flask"></ha-icon>
-              <div class="metric-copy">
-                <small>pH${label}</small>
-                <strong>
-                  ${this._sensorBadgeText(phEntityId, "?", (value) =>
-                    formatSensorReading(value),
-                  )}
-                </strong>
-              </div>
-            </button>
-          `
-        : ""}
-      ${ecEntityId
-        ? html`
-            <button
-              class="metric ec-metric"
-              type="button"
-              title=${label ? `Ver histórico da EC (reservatório ${reservoirNumber})` : "Ver histórico da EC"}
-              @click=${() => this._openMoreInfo(ecEntityId)}
-            >
-              <ha-icon icon="mdi:lightning-bolt"></ha-icon>
-              <div class="metric-copy">
-                <small>EC${label}</small>
-                <strong>
-                  ${this._sensorBadgeText(ecEntityId, "?", (value, unit) =>
-                    formatSensorReading(value, unit),
-                  )}
-                </strong>
-              </div>
-            </button>
-          `
-        : ""}
+      <button
+        class="metric ph-metric ${phStatusClass}"
+        type="button"
+        title=${disambiguate
+          ? `Ver histórico do pH (reservatório ${reservoirNumber})`
+          : "Ver histórico do pH"}
+        @click=${() => this._openMoreInfo(phEntityId)}
+      >
+        <ha-icon icon="mdi:flask"></ha-icon>
+        <div class="metric-copy">
+          <small>pH</small>
+          <strong>
+            ${this._sensorBadgeText(phEntityId, "?", (value) =>
+              formatSensorReading(value),
+            )}
+          </strong>
+        </div>
+      </button>
+    `;
+  }
+
+  /** Same as `_renderPhMetric`, for EC. */
+  private _renderEcMetric(
+    reservoirNumber: 1 | 2,
+    ecEntityId: string,
+    disambiguate: boolean,
+  ): TemplateResult | "" {
+    if (!ecEntityId) {
+      return "";
+    }
+    return html`
+      <button
+        class="metric ec-metric"
+        type="button"
+        title=${disambiguate
+          ? `Ver histórico da EC (reservatório ${reservoirNumber})`
+          : "Ver histórico da EC"}
+        @click=${() => this._openMoreInfo(ecEntityId)}
+      >
+        <ha-icon icon="mdi:lightning-bolt"></ha-icon>
+        <div class="metric-copy">
+          <small>EC</small>
+          <strong>
+            ${this._sensorBadgeText(ecEntityId, "?", (value, unit) =>
+              formatSensorReading(value, unit),
+            )}
+          </strong>
+        </div>
+      </button>
     `;
   }
 
