@@ -324,7 +324,7 @@ export class IrrigationScheduleCard extends LitElement {
     const statusIcon = wateringOn
       ? "mdi:water"
       : switchOn
-        ? "mdi:calendar-check"
+        ? "mdi:calendar-check-outline"
         : "mdi:calendar-remove";
 
     const finishesAt = this._stringAttr(binaryEntity, "finishes_at");
