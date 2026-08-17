@@ -564,6 +564,16 @@ export class IrrigationScheduleCard extends LitElement {
                 <div class="actions ${wateringOn && finishesAt ? "watering" : ""}">
                   ${wateringOn && finishesAt
                     ? html`
+                        <button
+                          class="water-now-button stop"
+                          type="button"
+                          title="Parar rega"
+                          aria-label="Parar rega"
+                          @click=${this._stopWatering}
+                        >
+                          <ha-icon icon="mdi:stop"></ha-icon>
+                          Parar
+                        </button>
                         <div class="water-now-progress">
                           <div class="water-now-timer">
                             ${formatRemaining(remaining)} restantes${activeSource ===
@@ -578,16 +588,6 @@ export class IrrigationScheduleCard extends LitElement {
                             ></div>
                           </div>
                         </div>
-                        <button
-                          class="water-now-button stop"
-                          type="button"
-                          title="Parar rega"
-                          aria-label="Parar rega"
-                          @click=${this._stopWatering}
-                        >
-                          <ha-icon icon="mdi:stop"></ha-icon>
-                          Parar
-                        </button>
                       `
                     : html`
                         <button

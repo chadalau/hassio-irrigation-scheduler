@@ -701,7 +701,7 @@ export const cardStyles = css`
   .actions {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: flex-start;
     margin-top: 9px;
   }
 

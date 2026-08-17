@@ -707,7 +707,7 @@ var IrrigationScheduleCard=function(t){"use strict";function e(t,e,i,r){var s,o=
   .actions {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: flex-start;
     margin-top: 9px;
   }
 
@@ -1119,6 +1119,16 @@ var IrrigationScheduleCard=function(t){"use strict";function e(t,e,i,r){var s,o=
           ${r||E&&C?L`
                 <div class="actions ${E&&C?"watering":""}">
                   ${E&&C?L`
+                        <button
+                          class="water-now-button stop"
+                          type="button"
+                          title="Parar rega"
+                          aria-label="Parar rega"
+                          @click=${this._stopWatering}
+                        >
+                          <ha-icon icon="mdi:stop"></ha-icon>
+                          Parar
+                        </button>
                         <div class="water-now-progress">
                           <div class="water-now-timer">
                             ${function(t){const e=Math.max(0,Math.floor(Number.isFinite(t)?t:0)),i=Math.floor(e/3600),r=Math.floor(e%3600/60),s=e%60,o=String(r).padStart(2,"0"),n=String(s).padStart(2,"0");return i>0?`${i}:${o}:${n}`:`${o}:${n}`}(z)} restantes${"external"===N?` · ${Ot(N)}`:""}
@@ -1130,16 +1140,6 @@ var IrrigationScheduleCard=function(t){"use strict";function e(t,e,i,r){var s,o=
                             ></div>
                           </div>
                         </div>
-                        <button
-                          class="water-now-button stop"
-                          type="button"
-                          title="Parar rega"
-                          aria-label="Parar rega"
-                          @click=${this._stopWatering}
-                        >
-                          <ha-icon icon="mdi:stop"></ha-icon>
-                          Parar
-                        </button>
                       `:L`
                         <button
                           class="water-now-button"
