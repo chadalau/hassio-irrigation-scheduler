@@ -306,6 +306,10 @@ export class IrrigationScheduleCard extends LitElement {
       : undefined;
     const wateringOn = binaryEntity?.state === "on";
     const switchOn = switchEntity?.state === "on";
+    // Distinct from `!switchOn`: an absent or unavailable switch entity is
+    // UNKNOWN, not off, and must not make the card assert that scheduling is
+    // disabled. Only an explicit "off" state does.
+    const masterOff = switchEntity?.state === "off";
 
     const statusText = wateringOn
       ? "Regando"
@@ -426,8 +430,14 @@ export class IrrigationScheduleCard extends LitElement {
 
         <div class="summary">
           <div class="summary-main">
-            <strong>${todayCount === 1 ? "1 horário hoje" : `${todayCount} horários hoje`}</strong>
-            ${showNextRun
+            <strong>
+              ${masterOff
+                ? "Agendamento desativado"
+                : todayCount === 1
+                  ? "1 horário hoje"
+                  : `${todayCount} horários hoje`}
+            </strong>
+            ${!masterOff && showNextRun
               ? html`<span>Próxima: ${this._nextRunText(sensor.state)}</span>`
               : ""}
           </div>
@@ -569,6 +579,7 @@ export class IrrigationScheduleCard extends LitElement {
                     history,
                     nowIso,
                     this.hass?.config?.time_zone,
+                    masterOff,
                   ),
                 )}
           </div>
@@ -675,10 +686,22 @@ export class IrrigationScheduleCard extends LitElement {
     history: readonly HistoryRun[],
     nowIso: string,
     timeZone: string | undefined,
+    masterOff: boolean,
   ): TemplateResult {
     const perPot = perPotVolumeMl(flowRate, schedule.duration);
     const total = totalVolumeMl(flowRate, schedule.duration, numberOfPots);
-    const status = scheduleStatusToday(schedule, Boolean(warning), history, nowIso, timeZone);
+    const rawStatus = scheduleStatusToday(
+      schedule,
+      Boolean(warning),
+      history,
+      nowIso,
+      timeZone,
+    );
+    // "Ainda vai regar hoje" is a promise the zone cannot keep while the
+    // master switch is off, so drop it. A warning still stands (it describes
+    // a past failure) and so does "done" (it already ran today, possibly
+    // before the switch was turned off).
+    const status = masterOff && rawStatus === "pending" ? null : rawStatus;
     return html`
       <div class="schedule-row">
         <button

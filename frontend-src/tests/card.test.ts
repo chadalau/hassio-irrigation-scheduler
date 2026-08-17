@@ -1593,4 +1593,91 @@ describe("IrrigationScheduleCard summary block", () => {
     const card = await mountCard({ "sensor.jardim_next_run": baseSensor() }, []);
     expect(card.shadowRoot?.querySelector(".summary-stat")).toBeNull();
   });
+
+  it("says the schedule is off instead of counting runs that cannot happen", async () => {
+    // With the master switch off the backend stops publishing a next run, so
+    // counting today's schedules beside "Nenhum horario agendado" read as a
+    // contradiction.
+    const sensor = baseSensor({
+      schedules: [
+        { id: "a", time: "06:00:00", days: [today], duration: 600, enabled: true },
+        { id: "b", time: "18:00:00", days: [today], duration: 600, enabled: true },
+      ],
+    });
+    const card = await mountCard(
+      {
+        "sensor.jardim_next_run": sensor,
+        "switch.jardim_schedule_enabled": {
+          entity_id: "switch.jardim_schedule_enabled",
+          state: "off",
+          last_changed: "",
+          last_updated: "",
+          attributes: {},
+        },
+      },
+      [],
+    );
+
+    expect(summary(card).headline).toBe("Agendamento desativado");
+    // The "Proxima:" line goes with it rather than reading "Nenhum ...".
+    expect(card.shadowRoot?.querySelector(".summary-main span")).toBeNull();
+  });
+
+  it("does NOT claim the schedule is off when the switch entity is missing", async () => {
+    // Absent/unavailable is UNKNOWN, not off: asserting "desativado" there
+    // would be a claim the card cannot support.
+    const sensor = baseSensor({
+      schedules: [
+        { id: "a", time: "06:00:00", days: [today], duration: 600, enabled: true },
+      ],
+    });
+    const missing = await mountCard({ "sensor.jardim_next_run": sensor }, []);
+    expect(summary(missing).headline).toBe("1 horário hoje");
+
+    const unavailable = await mountCard(
+      {
+        "sensor.jardim_next_run": sensor,
+        "switch.jardim_schedule_enabled": {
+          entity_id: "switch.jardim_schedule_enabled",
+          state: "unavailable",
+          last_changed: "",
+          last_updated: "",
+          attributes: {},
+        },
+      },
+      [],
+    );
+    expect(summary(unavailable).headline).toBe("1 horário hoje");
+  });
+
+  it("drops the pending icon while the master switch is off", async () => {
+    // A schedule due later today would otherwise still promise "ainda vai
+    // regar hoje" with the whole automation disabled.
+    const sensor = baseSensor({
+      schedules: [
+        { id: "a", time: "23:59:00", days: [today], duration: 600, enabled: true },
+      ],
+    });
+    const off = {
+      entity_id: "switch.jardim_schedule_enabled",
+      state: "off",
+      last_changed: "",
+      last_updated: "",
+      attributes: {},
+    };
+    const card = await mountCard(
+      { "sensor.jardim_next_run": sensor, "switch.jardim_schedule_enabled": off },
+      [],
+    );
+    expect(card.shadowRoot?.querySelector(".status-pending")).toBeNull();
+
+    const on = await mountCard(
+      {
+        "sensor.jardim_next_run": sensor,
+        "switch.jardim_schedule_enabled": { ...off, state: "on" },
+      },
+      [],
+    );
+    expect(on.shadowRoot?.querySelector(".status-pending")).not.toBeNull();
+  });
 });

@@ -347,7 +347,7 @@ export const cardStyles = css`
   }
 
   .history-subtitle {
-    font-size: 0.8rem;
+    font-size: 13px;
     font-weight: 400;
     color: var(--secondary-text-color);
     margin-top: 2px;
@@ -367,12 +367,12 @@ export const cardStyles = css`
   }
 
   .history-stat-value {
-    font-size: 1.1rem;
+    font-size: 18px;
     font-weight: 600;
   }
 
   .history-stat-label {
-    font-size: 0.7rem;
+    font-size: 11px;
     color: var(--secondary-text-color);
   }
 
@@ -386,7 +386,7 @@ export const cardStyles = css`
     display: flex;
     justify-content: space-between;
     gap: 8px;
-    font-size: 0.75rem;
+    font-size: 12px;
     font-weight: 600;
     color: var(--secondary-text-color);
     padding-bottom: 4px;
@@ -402,7 +402,7 @@ export const cardStyles = css`
     align-items: center;
     gap: 8px;
     padding: 6px 0;
-    font-size: 0.8rem;
+    font-size: 13px;
   }
 
   .history-entry ha-icon {
@@ -684,7 +684,7 @@ export const cardStyles = css`
 
   .settings-actions button {
     padding: 8px 16px;
-    font-size: 0.9rem;
+    font-size: 14px;
     font-weight: 500;
     border: none;
     border-radius: 6px;
@@ -706,7 +706,7 @@ export const cardStyles = css`
     padding: 16px 0;
     text-align: center;
     color: var(--secondary-text-color);
-    font-size: 0.9rem;
+    font-size: 14px;
   }
 
   .add-schedule-button {
@@ -773,7 +773,7 @@ export const cardStyles = css`
     gap: 8px;
     padding: 16px;
     color: var(--error-color, #db4437);
-    font-size: 0.9rem;
+    font-size: 14px;
   }
 
   .overlay {
@@ -796,7 +796,7 @@ export const cardStyles = css`
   }
 
   .dialog-header {
-    font-size: 1rem;
+    font-size: 16px;
     font-weight: 500;
     margin-bottom: 12px;
   }
@@ -815,7 +815,7 @@ export const cardStyles = css`
   }
 
   .field label {
-    font-size: 0.8rem;
+    font-size: 13px;
     color: var(--secondary-text-color);
   }
 
@@ -824,7 +824,7 @@ export const cardStyles = css`
     width: 100%;
     box-sizing: border-box;
     padding: 8px 10px;
-    font-size: 1rem;
+    font-size: 16px;
     color: var(--primary-text-color);
     background: var(--input-fill-color, rgba(0, 0, 0, 0.05));
     border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
@@ -857,15 +857,17 @@ export const cardStyles = css`
   }
 
   .duration-segment-label {
-    font-size: 0.7rem;
+    font-size: 11px;
     color: var(--secondary-text-color);
     margin-bottom: 2px;
   }
 
-  .duration-segment-input {
+  /* Outranks the generic .field number-input rule, which otherwise forced
+     this back to 16px. Staying ABOVE 16px also avoids iOS zoom-on-focus. */
+  .field input.duration-segment-input {
     width: 30px;
     text-align: center;
-    font-size: 1.1rem;
+    font-size: 18px;
     font-weight: 500;
     color: var(--primary-text-color);
     background: transparent;
@@ -886,7 +888,7 @@ export const cardStyles = css`
   }
 
   .duration-colon {
-    font-size: 1.1rem;
+    font-size: 18px;
     font-weight: 500;
     color: var(--primary-text-color);
   }
@@ -907,7 +909,7 @@ export const cardStyles = css`
     width: 100%;
     box-sizing: border-box;
     padding: 8px 10px;
-    font-size: 1rem;
+    font-size: 16px;
     color: var(--primary-text-color);
     background: var(--input-fill-color, rgba(0, 0, 0, 0.05));
     border: 1px solid var(--divider-color, rgba(0, 0, 0, 0.12));
@@ -916,22 +918,24 @@ export const cardStyles = css`
   }
 
   .duration-part span {
-    font-size: 0.8rem;
+    font-size: 13px;
     color: var(--secondary-text-color);
     flex-shrink: 0;
   }
 
-  .day-option {
+  /* ".field label" (0,1,1) outranks a bare ".day-option" (0,1,0), so the size
+     below never reached the screen until this selector was made specific. */
+  .field .day-option {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 2px;
-    font-size: 0.7rem;
+    font-size: 11px;
     color: var(--secondary-text-color);
     cursor: pointer;
   }
 
-  .day-option input[type="checkbox"] {
+  .field .day-option input[type="checkbox"] {
     width: 18px;
     height: 18px;
     accent-color: var(--primary-color, #03a9f4);
@@ -947,7 +951,7 @@ export const cardStyles = css`
 
   .dialog-actions button {
     padding: 8px 16px;
-    font-size: 0.9rem;
+    font-size: 14px;
     font-weight: 500;
     border: none;
     border-radius: 6px;
@@ -966,7 +970,7 @@ export const cardStyles = css`
 
   .form-error {
     color: var(--error-color, #db4437);
-    font-size: 0.8rem;
+    font-size: 13px;
   }
 
   .compact .card-body {
