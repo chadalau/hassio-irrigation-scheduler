@@ -790,7 +790,18 @@ export class IrrigationScheduleCard extends LitElement {
     }
     const defaultDurationMin = Math.max(1, Math.round(defaultDurationSec / 60));
     return html`
-      <div class="settings-panel">
+      <div class="overlay" @click=${this._closeSettings}>
+        <div
+          class="dialog settings-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="irrigation-settings-title"
+          tabindex="-1"
+          @keydown=${this._onDialogKeydown}
+          @click=${(ev: Event) => ev.stopPropagation()}
+        >
+          <div class="dialog-header" id="irrigation-settings-title">Configurar zona</div>
+          <div class="dialog-body">
         <div class="field">
           <label>Duração padrão da rega (min)</label>
           <input
@@ -932,11 +943,13 @@ export class IrrigationScheduleCard extends LitElement {
         ${this._settingsError
           ? html`<div class="form-error">${this._settingsError}</div>`
           : ""}
-        <div class="settings-actions">
+        <div class="dialog-actions">
           <button type="button" class="dialog-cancel" @click=${this._closeSettings}>
             Fechar
           </button>
           <button type="button" class="dialog-save" @click=${this._saveSettings}>Salvar</button>
+        </div>
+          </div>
         </div>
       </div>
     `;
@@ -950,7 +963,9 @@ export class IrrigationScheduleCard extends LitElement {
     if (this._settingsOpen) {
       this._closeSettings();
     } else {
+      this._rememberDialogFocus();
       this._settingsOpen = true;
+      this._focusOpenDialog();
     }
   }
 
@@ -984,6 +999,7 @@ export class IrrigationScheduleCard extends LitElement {
     this._settingsEcEntity2 = "";
     this._settingsEcEntity2Touched = false;
     this._settingsError = null;
+    this._restoreDialogFocus();
   }
 
   private _onSettingsDefaultDurationChange(ev: Event): void {
@@ -1715,7 +1731,13 @@ export class IrrigationScheduleCard extends LitElement {
   private _onDialogKeydown(ev: KeyboardEvent): void {
     if (ev.key === "Escape") {
       ev.preventDefault();
-      this._historyOpen ? this._closeHistory() : this._closeDialog();
+      if (this._settingsOpen) {
+        this._closeSettings();
+      } else if (this._historyOpen) {
+        this._closeHistory();
+      } else {
+        this._closeDialog();
+      }
       return;
     }
     if (ev.key !== "Tab") {

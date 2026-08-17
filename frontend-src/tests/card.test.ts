@@ -280,7 +280,7 @@ describe("IrrigationScheduleCard settings panel pH gate", () => {
     await card.updateComplete;
 
     const saveButton = card.shadowRoot?.querySelector(
-      ".settings-panel .dialog-save",
+      ".settings-dialog .dialog-save",
     ) as HTMLButtonElement;
     saveButton.click();
     await card.updateComplete;
@@ -308,7 +308,7 @@ describe("IrrigationScheduleCard settings panel pH gate", () => {
     await card.updateComplete;
 
     const numberInputs = card.shadowRoot?.querySelectorAll(
-      '.settings-panel .duration-row input[type="number"]',
+      '.settings-dialog .duration-row input[type="number"]',
     ) as NodeListOf<HTMLInputElement>;
     // 4 = R1 min/max + R2 min/max; the first pair (index 0/1) is R1's.
     expect(numberInputs).toHaveLength(4);
@@ -317,17 +317,17 @@ describe("IrrigationScheduleCard settings panel pH gate", () => {
     await card.updateComplete;
 
     const saveButton = card.shadowRoot?.querySelector(
-      ".settings-panel .dialog-save",
+      ".settings-dialog .dialog-save",
     ) as HTMLButtonElement;
     saveButton.click();
     await card.updateComplete;
 
     expect(calls).toHaveLength(0);
-    expect(card.shadowRoot?.querySelector(".settings-panel .form-error")?.textContent).toContain(
+    expect(card.shadowRoot?.querySelector(".settings-dialog .form-error")?.textContent).toContain(
       "mínimo",
     );
     // The panel stays open so the user can fix the values.
-    expect(card.shadowRoot?.querySelector(".settings-panel")).not.toBeNull();
+    expect(card.shadowRoot?.querySelector(".settings-dialog")).not.toBeNull();
   });
 
   it("only sends ec_entity_id when the field was actually edited", async () => {
@@ -345,7 +345,7 @@ describe("IrrigationScheduleCard settings panel pH gate", () => {
     await card.updateComplete;
 
     (
-      card.shadowRoot?.querySelector(".settings-panel .dialog-save") as HTMLButtonElement
+      card.shadowRoot?.querySelector(".settings-dialog .dialog-save") as HTMLButtonElement
     ).click();
     await card.updateComplete;
 
@@ -364,14 +364,14 @@ describe("IrrigationScheduleCard settings panel pH gate", () => {
     await card.updateComplete;
 
     const durationInput = card.shadowRoot?.querySelector(
-      ".settings-panel .field input[type='number']",
+      ".settings-dialog .field input[type='number']",
     ) as HTMLInputElement;
     expect(durationInput.value).toBe("10"); // 600s displayed as 10 minutes
     dispatchChange(durationInput, "15");
     await card.updateComplete;
 
     (
-      card.shadowRoot?.querySelector(".settings-panel .dialog-save") as HTMLButtonElement
+      card.shadowRoot?.querySelector(".settings-dialog .dialog-save") as HTMLButtonElement
     ).click();
     await card.updateComplete;
 
@@ -385,7 +385,7 @@ describe("IrrigationScheduleCard settings panel pH gate", () => {
     await card.updateComplete;
 
     const durationInput = card.shadowRoot?.querySelector(
-      ".settings-panel .field input[type='number']",
+      ".settings-dialog .field input[type='number']",
     ) as HTMLInputElement;
     dispatchChange(durationInput, "42");
     await card.updateComplete;

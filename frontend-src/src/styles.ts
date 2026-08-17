@@ -608,31 +608,6 @@ export const cardStyles = css`
     font-weight: 400;
   }
 
-  .settings-panel {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    padding: 8px 16px 16px;
-    border-top: 1px solid var(--divider-color, rgba(0, 0, 0, 0.08));
-    margin-top: 8px;
-  }
-
-  .settings-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 4px;
-  }
-
-  .settings-actions button {
-    padding: 8px 16px;
-    font-size: 14px;
-    font-weight: 500;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-
   .schedule-actions {
     display: flex;
     align-items: center;
@@ -787,6 +762,19 @@ export const cardStyles = css`
     min-width: 0;
   }
 
+  /* The settings dialog holds many fields; keep the header/actions pinned and
+     let only the field list scroll on short viewports. */
+  .settings-dialog {
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .settings-dialog .dialog-body {
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
   .field {
     display: flex;
     flex-direction: column;
@@ -799,7 +787,8 @@ export const cardStyles = css`
   }
 
   .field input[type="time"],
-  .field input[type="number"] {
+  .field input[type="number"],
+  .field input[type="text"] {
     width: 100%;
     box-sizing: border-box;
     padding: 8px 10px;
