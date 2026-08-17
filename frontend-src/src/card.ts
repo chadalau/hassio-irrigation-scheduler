@@ -487,6 +487,8 @@ export class IrrigationScheduleCard extends LitElement {
                 <div class="metrics">
                   ${bothReservoirs
                     ? html`
+                        <div class="reservoir-column-title">Reservatório 1</div>
+                        <div class="reservoir-column-title">Reservatório 2</div>
                         ${this._renderPhMetric(1, phEntityId, phStatusClass, true) ||
                         html`<span></span>`}
                         ${this._renderPhMetric(2, phEntityId2, phStatusClass2, true) ||
@@ -621,22 +623,15 @@ export class IrrigationScheduleCard extends LitElement {
   }
 
   /**
-   * The pH and EC metric tiles for one reservoir. ``label`` (" R1"/" R2") is
-   * only passed when BOTH reservoirs are shown -- with a single reservoir
-   * there is nothing to disambiguate, so callers pass "" and the tiles read
-   * plain "pH"/"EC". Each tile stays a button so clicking it still opens
-   * HA's native history dialog for that sensor.
-   */
-  /**
    * One pH tile, or "" when this reservoir has no pH sensor -- callers in
    * the two-reservoir grid must substitute an empty placeholder cell of
    * their own instead of using "" directly, or a sensor missing on one
    * reservoir shifts the OTHER reservoir's tiles out of their column (see
    * the `bothReservoirs` branch: pH1, pH2, EC1, EC2 must land in that exact
-   * order for the transposed grid to line up). `disambiguate` appends the
-   * reservoir number to both the visible label ("pH 2") and the tooltip
-   * only when a second reservoir is on screen -- with just one there is
-   * nothing to disambiguate.
+   * order for the transposed grid to line up). The visible label always
+   * reads plain "pH"; with two reservoirs the "Reservatório N" title above
+   * the column disambiguates instead. `disambiguate` only affects the
+   * tooltip, which has no column title to lean on.
    */
   private _renderPhMetric(
     reservoirNumber: 1 | 2,
@@ -658,7 +653,7 @@ export class IrrigationScheduleCard extends LitElement {
       >
         <ha-icon icon="mdi:flask"></ha-icon>
         <div class="metric-copy">
-          <small>pH${disambiguate ? ` ${reservoirNumber}` : ""}</small>
+          <small>pH</small>
           <strong>
             ${this._sensorBadgeText(phEntityId, "?", (value) =>
               formatSensorReading(value),
@@ -689,7 +684,7 @@ export class IrrigationScheduleCard extends LitElement {
       >
         <ha-icon icon="mdi:lightning-bolt"></ha-icon>
         <div class="metric-copy">
-          <small>EC${disambiguate ? ` ${reservoirNumber}` : ""}</small>
+          <small>EC</small>
           <strong>
             ${this._sensorBadgeText(ecEntityId, "?", (value, unit) =>
               formatSensorReading(value, unit),

@@ -180,6 +180,14 @@ export const cardStyles = css`
     gap: 6px;
   }
 
+  /* Only rendered with two reservoirs: sits in the grid's own first row,
+     directly above its reservoir's pH/EC tiles (see the bothReservoirs
+     branch, which emits these before the tiles in pH1/pH2/EC1/EC2 order). */
+  .reservoir-column-title {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--secondary-text-color);
+  }
 
   .metric {
     min-width: 0;
