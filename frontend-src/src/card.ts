@@ -483,12 +483,17 @@ export class IrrigationScheduleCard extends LitElement {
           ? html`
               <div class="section-divider"></div>
               <div class="card-body">
-                <h3 class="section-title">Reservatório</h3>
+                ${bothReservoirs
+                  ? html`
+                      <div class="section-title-row">
+                        <h3 class="section-title">Reservatório 1</h3>
+                        <h3 class="section-title">Reservatório 2</h3>
+                      </div>
+                    `
+                  : html`<h3 class="section-title">Reservatório</h3>`}
                 <div class="metrics">
                   ${bothReservoirs
                     ? html`
-                        <div class="reservoir-column-title">Reservatório 1</div>
-                        <div class="reservoir-column-title">Reservatório 2</div>
                         ${this._renderPhMetric(1, phEntityId, phStatusClass, true) ||
                         html`<span></span>`}
                         ${this._renderPhMetric(2, phEntityId2, phStatusClass2, true) ||
@@ -629,9 +634,9 @@ export class IrrigationScheduleCard extends LitElement {
    * reservoir shifts the OTHER reservoir's tiles out of their column (see
    * the `bothReservoirs` branch: pH1, pH2, EC1, EC2 must land in that exact
    * order for the transposed grid to line up). The visible label always
-   * reads plain "pH"; with two reservoirs the "Reservatório N" title above
-   * the column disambiguates instead. `disambiguate` only affects the
-   * tooltip, which has no column title to lean on.
+   * reads plain "pH"; with two reservoirs the "Reservatório 2" title in the
+   * section header row disambiguates the second column instead.
+   * `disambiguate` only affects the tooltip, which has no header to lean on.
    */
   private _renderPhMetric(
     reservoirNumber: 1 | 2,

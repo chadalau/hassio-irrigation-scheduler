@@ -522,7 +522,7 @@ describe("IrrigationScheduleCard pH/EC header badges", () => {
 });
 
 describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
-  it("renders R1 and R2 pH/EC badges in their own labeled rows, no R2 text suffix", async () => {
+  it("renders R1 and R2 pH/EC tiles; only R2 carries a reservoir label", async () => {
     const card = await mountCard(
       {
         "sensor.jardim_next_run": baseSensor({
@@ -567,8 +567,8 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
     const ecTiles = card.shadowRoot?.querySelectorAll(".ec-metric");
     expect(phTiles).toHaveLength(2);
     expect(ecTiles).toHaveLength(2);
-    // With two reservoirs the column titles carry the disambiguation, so the
-    // tile labels themselves stay plain "pH"/"EC".
+    // The tiles themselves stay plain "pH"/"EC"; the second reservoir is
+    // disambiguated by a "Reservatório 2" title in the section header row.
     const label = (el: Element | undefined) =>
       el?.querySelector("small")?.textContent?.trim();
     const value = (el: Element | undefined) =>
@@ -582,13 +582,13 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
     expect(value(ecTiles?.[0])).toBe("800 µS/cm");
     expect(value(ecTiles?.[1])).toBe("1200 µS/cm");
 
-    const columnTitles = Array.from(
-      card.shadowRoot?.querySelectorAll(".reservoir-column-title") ?? [],
+    const headerTitles = Array.from(
+      card.shadowRoot?.querySelectorAll(".section-title-row .section-title") ?? [],
     ).map((el) => el.textContent?.trim());
-    expect(columnTitles).toEqual(["Reservatório 1", "Reservatório 2"]);
+    expect(headerTitles).toEqual(["Reservatório 1", "Reservatório 2"]);
   });
 
-  it("lays out reservoir 1 and reservoir 2 as side-by-side columns, titles first", async () => {
+  it("lays out reservoir 1 and reservoir 2 as side-by-side columns", async () => {
     const card = await mountCard(
       {
         "sensor.jardim_next_run": baseSensor({
@@ -603,26 +603,17 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
     const children = Array.from(
       card.shadowRoot?.querySelector(".metrics")?.children ?? [],
     );
-    // The grid is transposed by reservoir, not by sensor type: the two
-    // column-title cells fill row 0, then pH1/pH2 fill row 1 and EC1/EC2
-    // fill row 2 -- so each reservoir occupies one full column instead of
-    // one full row, per the "reservoir 2 as a column, not a row below" ask.
-    expect(children).toHaveLength(6);
+    // The grid is transposed by reservoir, not by sensor type: pH1/pH2 fill
+    // row 0 and EC1/EC2 fill row 1 -- so each reservoir occupies one full
+    // column instead of one full row.
+    expect(children).toHaveLength(4);
     expect(children.map((el) => el.className.split(" ")[0])).toEqual([
-      "reservoir-column-title",
-      "reservoir-column-title",
       "metric",
       "metric",
       "metric",
       "metric",
     ]);
-    const titles = children
-      .slice(0, 2)
-      .map((el) => el.textContent?.trim());
-    expect(titles).toEqual(["Reservatório 1", "Reservatório 2"]);
-    const metricClasses = children
-      .slice(2)
-      .map((el) => el.className.split(" ")[1]);
+    const metricClasses = children.map((el) => el.className.split(" ")[1]);
     expect(metricClasses).toEqual(["ph-metric", "ph-metric", "ec-metric", "ec-metric"]);
   });
 
@@ -701,15 +692,15 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
     expect(card.shadowRoot?.querySelector(".reservoir-level")).not.toBeNull();
   });
 
-  it("shows the reservoir column titles only when both reservoirs are shown", async () => {
+  it("adds a 'Reservatório 2' header only when both reservoirs are shown", async () => {
     const single = await mountCard(
       { "sensor.jardim_next_run": baseSensor({ ph_entity_id: "sensor.r1_ph" }) },
       [],
     );
+    // With one reservoir there is nothing to disambiguate: plain title + "pH".
     expect(
-      single.shadowRoot?.querySelectorAll(".reservoir-column-title"),
+      single.shadowRoot?.querySelectorAll(".section-title-row"),
     ).toHaveLength(0);
-    // With one reservoir there is nothing to disambiguate: plain "pH".
     expect(
       single.shadowRoot?.querySelector(".ph-metric small")?.textContent?.trim(),
     ).toBe("pH");
@@ -724,11 +715,10 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
       [],
     );
     const titles = Array.from(
-      both.shadowRoot?.querySelectorAll(".reservoir-column-title") ?? [],
+      both.shadowRoot?.querySelectorAll(".section-title-row .section-title") ?? [],
     ).map((el) => el.textContent?.trim());
     expect(titles).toEqual(["Reservatório 1", "Reservatório 2"]);
-    // The tile labels stay plain "pH" even with two reservoirs now that the
-    // column title above does the disambiguating.
+    // The tiles themselves stay plain "pH".
     const labels = Array.from(
       both.shadowRoot?.querySelectorAll(".ph-metric small") ?? [],
     ).map((el) => el.textContent?.trim());
