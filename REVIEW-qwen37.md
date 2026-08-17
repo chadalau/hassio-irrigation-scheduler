@@ -1,50 +1,35 @@
-# REVIEW-qwen37.md — Revisão adversarial independente
+# REVIEW-qwen37 — Revisão adversarial independente
 
 **Data:** 2026-08-16  
-**Modelo:** qwen3.7-max (opencode-go/qwen3.7-max)  
-**Escopo:** Working tree do repositório `watergaia` (mudanças não commitadas + contexto completo)
+**Modelo:** Qwen 3.7 Max (opencode-go/qwen3.7-max)  
+**Commit revisado:** `3ce5397` — "feat(card): restyle to match the sibling light_scheduler card"  
+**Escopo:** Frontend (card Lit/TypeScript restyle) + regressão backend
 
 ---
 
 ## Arquivos revisados
 
-### Backend (sem mudanças no working tree)
-- `custom_components/irrigation_scheduler/__init__.py`
-- `custom_components/irrigation_scheduler/scheduler.py`
-- `custom_components/irrigation_scheduler/config_flow.py`
-- `custom_components/irrigation_scheduler/store.py`
-- `custom_components/irrigation_scheduler/next_run.py`
-- `custom_components/irrigation_scheduler/schedules.py`
-- `custom_components/irrigation_scheduler/sensor.py`
-- `custom_components/irrigation_scheduler/switch.py`
-- `custom_components/irrigation_scheduler/binary_sensor.py`
-- `custom_components/irrigation_scheduler/const.py`
-- `custom_components/irrigation_scheduler/manifest.json` (modificado)
+### Frontend (foco principal)
+- `frontend-src/src/card.ts` (1846 linhas)
+- `frontend-src/src/styles.ts` (1002 linhas)
+- `frontend-src/src/utils.ts` (606 linhas)
+- `frontend-src/src/types.ts` (143 linhas)
+- `frontend-src/src/const.ts` (9 linhas)
+- `frontend-src/src/editor.ts` (86 linhas)
+- `frontend-src/tests/card.test.ts` (1522 linhas)
+- `frontend-src/tests/editor.test.ts` (143 linhas)
+- `frontend-src/tests/utils.test.ts` (737 linhas)
+- `custom_components/irrigation_scheduler/frontend/irrigation-schedule-card.js` (bundle)
 
-### Frontend fonte (modificados)
-- `frontend-src/src/card.ts`
-- `frontend-src/src/styles.ts`
-- `frontend-src/src/utils.ts`
-- `frontend-src/src/types.ts`
-- `frontend-src/src/const.ts`
-- `frontend-src/src/editor.ts`
-
-### Frontend testes
-- `frontend-src/tests/card.test.ts`
-- `frontend-src/tests/editor.test.ts`
-- `frontend-src/tests/utils.test.ts`
-
-### Backend testes
-- `tests/test_next_run.py`
-- `tests/test_schedules.py`
-- `tests/integration/` (todos os arquivos)
-
-### Bundle buildado
-- `custom_components/irrigation_scheduler/frontend/irrigation-schedule-card.js` (modificado)
-
-### Documentação
-- `FUNCTIONS.md` (modificado)
-- `plano.md` (não rastreado, apenas inspecionado)
+### Backend (regressão)
+- `custom_components/irrigation_scheduler/__init__.py` (507 linhas)
+- `custom_components/irrigation_scheduler/scheduler.py` (1165+ linhas)
+- `custom_components/irrigation_scheduler/sensor.py` (160 linhas)
+- `custom_components/irrigation_scheduler/binary_sensor.py` (81 linhas)
+- `custom_components/irrigation_scheduler/switch.py` (73 linhas)
+- `custom_components/irrigation_scheduler/next_run.py` (218 linhas)
+- `custom_components/irrigation_scheduler/const.py` (127 linhas)
+- `custom_components/irrigation_scheduler/manifest.json` (version 0.11.2)
 
 ---
 
@@ -61,77 +46,74 @@ Nenhum.
 
 ### BAIXO
 
-#### B1. `type="button"` ausente nos toggles customizados e no botão "Adicionar horário"
-- **Arquivo:** `frontend-src/src/card.ts:374-384` (master toggle), `card.ts:635-645` (schedule toggle), `card.ts:523-531` (add-schedule-button)
-- **Cenário:** Os três `<button>` customizados não possuem `type="button"`. O default HTML é `type="submit"`. Embora o card Lovelace não esteja dentro de um `<form>` (portanto sem risco real de submit acidental), o botão "Parar" na watering-bar (`card.ts:471-478`) já possui `type="button"` corretamente, criando uma inconsistência interna.
-- **Evidência:** Inspeção do código. O `watering-stop-button` tem `type="button"` (linha 473), mas os toggles e o add-schedule-button não.
-- **Impacto:** Nenhum risco funcional no contexto atual (sem form), mas é uma boa prática de acessibilidade/robustez. Se no futuro o card for envolvido em um form (improvável mas possível em dashboards customizados), os botões sem `type="button"` disparariam submit.
-- **Sugestão:** Adicionar `type="button"` aos três botões para consistência com o `watering-stop-button`.
+#### B-1. CSS duplicado: `.zone-icon` e `.status` definidos em dois blocos separados
+- **Arquivo:** `frontend-src/src/styles.ts`
+- **Linhas:** `.zone-icon` em L30-38 e L91-93; `.status` em L87-89 e L97-109
+- **Cenário:** `.zone-icon` é definido primeiro com `width/height/display/border-radius/background/color` (L30-38) e depois novamente com apenas `flex-shrink: 0` (L91-93). O mesmo padrão ocorre com `.status`: `flex-shrink: 0` (L87-89) e depois o chip visual completo (L97-109).
+- **Evidência:** `grep` confirma duas ocorrências de cada seletor como bloco independente.
+- **Impacto:** Funcionalmente inócuo (CSS permite e o cascade resolve corretamente), mas dificulta manutenção — um futuro editor que altere `.zone-icon` no primeiro bloco pode não perceber que há um segundo bloco adicionando `flex-shrink: 0`.
+- **Sugestão:** Consolidar cada seletor em um único bloco.
 
-#### B2. `aria-label` inconsistente entre master toggle e schedule toggle
-- **Arquivo:** `frontend-src/src/card.ts:379` (master) vs `card.ts:640` (schedule)
-- **Cenário:** O master toggle usa `aria-label` descritivo do **estado** (`"Agendamento ativo"` / `"Agendamento desativado"`), enquanto o schedule toggle usa `aria-label` descritivo da **ação** (`"Desativar horário"` / `"Ativar horário"`). Ambos são válidos segundo WAI-ARIA para `role="switch"`, mas a inconsistência dentro do mesmo card pode confundir usuários de screen reader.
-- **Evidência:**
-  - Master (linha 379): `aria-label=${switchOn ? "Agendamento ativo" : "Agendamento desativado"}`
-  - Schedule (linha 640): `aria-label=${schedule.enabled ? "Desativar horário" : "Ativar horário"}`
-- **Impacto:** Funcionalmente correto em ambos os casos. Inconsistência de UX menor.
-- **Sugestão:** Padronizar em um dos dois estilos. O estilo "ação" (schedule toggle) é mais informativo para o usuário de screen reader, pois comunica o que acontecerá ao clicar.
+#### B-2. Inconsistência tipográfica: card principal usa px fixo, diálogos/painéis usam rem
+- **Arquivo:** `frontend-src/src/styles.ts`
+- **Linhas:** 20 ocorrências de `rem` (L362, 382, 387, 401, 417, 704, 726, 793, 816, 835, 844, 877, 885, 906, 927, 936, 946, 967, 986)
+- **Cenário:** O commit message declara "Fixed px scale matching light (20/13/11/22/9) instead of rem, which drifts with the browser's font setting". A escala px foi aplicada ao card principal (header, summary, metrics, schedules, watering bar), mas os diálogos (add/edit schedule, history), o painel de configurações e o `.empty` state continuam usando `rem` (0.7rem a 1.1rem).
+- **Evidência:** `grep` por `rem` em styles.ts retorna 20 ocorrências, todas em seletores de diálogos, settings panel, config-error e empty state.
+- **Impacto:** Se o usuário alterar o font-size do browser, o card principal mantém suas proporções (objetivo declarado), mas os diálogos escalam independentemente — criando uma inconsistência visual entre o card e seus próprios overlays. Não é um bug funcional, mas contradiz o objetivo declarado no commit.
+- **Sugestão:** Decidir se os diálogos devem seguir a mesma escala px (consistência total) ou se a exceção é intencional (documentar no comentário do styles.ts).
 
 ### INFORMATIVO
 
-#### I1. Version bump 0.11.1 → 0.11.6 (pulo de 4 versões intermediárias)
-- **Arquivo:** `custom_components/irrigation_scheduler/manifest.json:16`
-- **Cenário:** A versão pulou de 0.11.1 para 0.11.6 sem passar por 0.11.2–0.11.5. Não há código que dependa de versão específica (sem migração baseada em versão, sem check de versão mínima da integração). O HACS usa o version apenas para exibição e comparação de updates.
-- **Impacto:** Inofensivo. O número de versão é arbitrário e não afeta funcionalidade.
+#### I-1. `ha-icon-button` sem `type="button"` explícito
+- **Arquivo:** `frontend-src/src/card.ts`, L747-752
+- **Cenário:** Os botões de editar/excluir schedule usam `<ha-icon-button>`, um componente HA (não `<button>` nativo). O teste "gives every custom button an explicit type" (card.test.ts L1505-1521) verifica apenas `button` nativos via `querySelectorAll("button")`, portanto não cobre `ha-icon-button`.
+- **Evidência:** O teste passa porque `ha-icon-button` renderiza internamente um `<mwc-icon-button>` que carrega seu próprio `type`. O `querySelectorAll("button")` no shadow root do card não atravessa o shadow root do `ha-icon-button`.
+- **Impacto:** Nenhum — o componente HA já trata isso internamente. Apenas registro para completude.
 
-#### I2. `plano.md` não rastreado pelo git
-- **Arquivo:** `plano.md` (untracked)
-- **Cenário:** Documento de planejamento para uma integração-irmã `light_scheduler`. Contém apenas decisões de design e uma matriz de reuso/adaptação. Nenhum código.
-- **Impacto:** Nenhum. Não afeta o código atual. Pode ser adicionado ao `.gitignore` ou commitado como documento de referência.
-
-#### I3. `CheckableElement` interface ainda é usada (não é dead code)
-- **Arquivo:** `frontend-src/src/card.ts:50-52`
-- **Cenário:** Com a remoção de `ha-switch` e a mudança de assinatura de `_toggleMaster`/`_toggleScheduleEnabled`, a interface `CheckableElement` poderia parecer dead code. No entanto, ela ainda é usada em `_toggleDay` (linha 1718) para os checkboxes de dias da semana.
-- **Impacto:** Nenhum. A interface está correta e em uso.
+#### I-2. `countSchedulesToday` não importado no teste de card
+- **Arquivo:** `frontend-src/tests/card.test.ts`
+- **Cenário:** A função `countSchedulesToday` (utils.ts L552-565) é usada no card (L339) para o bloco de resumo, mas não possui teste unitário dedicado em `utils.test.ts`.
+- **Evidência:** `grep` por `countSchedulesToday` em `utils.test.ts` retorna zero resultados. A função é testada indiretamente via card.test.ts (o summary block renderiza a contagem), mas não há teste unitário isolado cobrindo timezone, schedules desabilitados, etc.
+- **Impacto:** Baixo — a função é simples (filter + length) e a lógica de `weekdayInZone` já é coberta pelos testes de `scheduleStatusToday`. Mas um teste unitário explícito daria mais confiança em edge cases.
 
 ---
 
 ## Falsos positivos (suspeitas testadas e refutadas)
 
-### FP1. `aria-checked` com boolean no Lit
-- **Suspeita:** `aria-checked=${switchOn}` (boolean) poderia renderizar como `aria-checked=""` (boolean attribute) em vez de `aria-checked="true"`/`aria-checked="false"`.
-- **Refutação:** O Lit converte boolean para string via `String(value)` quando usado como atributo sem o prefixo `?`. `String(true)` = `"true"`, `String(false)` = `"false"`. Isso é o comportamento correto para ARIA attributes (que aceitam "true", "false", "mixed"). Confirmado pela documentação do Lit e pelo comportamento do `AttributePart`.
+### FP-1. Header title colapsando para largura zero em cards estreitos
+- **Suspeita:** Com `flex-wrap: wrap` e `.header-title { flex: 1 1 110px; min-width: 0 }`, o título poderia colapsar para zero em cards muito estreitos.
+- **Refutação:** `flex: 1 1 110px` estabelece uma base de 110px. Com `flex-wrap: wrap`, quando não há espaço suficiente na linha, o título quebra para a próxima linha inteira — nunca é espremido para zero. Em um card de 260px (padding 16px cada lado = 228px úteis), os elementos fixos (zone-icon 32px + gap 8px + status ~80px + gap 8px + toggle 30px + gap 8px + cog 30px = ~196px) deixam ~32px na primeira linha, insuficiente para 110px de base — o título vai para a linha seguinte com largura total. O commit message afirma "verified 260-460px with no truncation or overflow" e a análise CSS confirma.
 
-### FP2. Keyboard support ausente nos toggles
-- **Suspeita:** Os `<button role="switch">` customizados poderiam não responder a Enter/Space.
-- **Refutação:** O `<button>` nativo já responde a Enter e Space por padrão, disparando o evento `click`. O handler `@click` é disparado automaticamente por keyboard. O `:focus-visible` está presente no CSS (styles.ts:415-418). Acessibilidade keyboard está correta.
+### FP-2. Toggle hit area roubando cliques de toggles adjacentes
+- **Suspeita:** O `::before { inset: -7px -5px }` expande a área de clique do toggle além do gap entre schedule rows (4px).
+- **Refutação:** O inset vertical de 7px ultrapassa o gap de 4px entre rows, mas como cada toggle está na primeira coluna de sua própria grid row, a sobreposição ocorre na área entre rows (não sobre outro toggle). Um clique nessa área entre rows seria capturado pelo toggle mais próximo — comportamento desejável (ampliar a área de clique). Não há sobreposição entre dois toggles.
 
-### FP3. Thumb do toggle cortado pelo `overflow: hidden` do `ha-card`
-- **Suspeita:** O thumb (20x20px) transborda do track (34x12px) e poderia ser cortado pelo `overflow: hidden` do `ha-card` (styles.ts:5).
-- **Refutação:** O `.schedule-row` tem `padding: 2px 10px` e está dentro de `.schedules` (margin-top: 8px) dentro de `.card-body` (padding: 0 16px 16px). O thumb transborda 4px verticalmente, mas o conteúdo adjacente (schedule-info com duas linhas de texto) é mais alto que 20px, então o grid row height acomoda o thumb. O `overflow: hidden` do `ha-card` não corta o thumb porque ele está bem dentro dos limites do card.
+### FP-3. `_stringAttr` retornando undefined para string vazia
+- **Suspeita:** `_stringAttr` (card.ts L1396) retorna `undefined` para strings vazias (`typeof value === "string" && value` — empty string é falsy). Isso poderia fazer `phEntityId` ser `undefined` em vez de `""`.
+- **Refutação:** Todos os call sites usam `?? ""` (ex.: L290 `this._stringAttr(sensor, "ph_entity_id") ?? ""`), então o resultado final é sempre `""` quando o atributo é vazio ou ausente. O comportamento é intencional e correto.
 
-### FP4. Testes de frontend quebrados pela mudança de assinatura
-- **Suspeita:** Os testes poderiam estar usando a assinatura antiga de `_toggleMaster(entity, ev)` ou `_toggleScheduleEnabled(schedule, ev)`.
-- **Refutação:** `grep` por `_toggleMaster`, `_toggleScheduleEnabled` e `ha-switch` nos testes retornou zero resultados. Os testes não exercitam esses métodos diretamente. Todos os 155 testes de frontend passaram.
+### FP-4. `reservoirPct` com divisão por zero
+- **Suspeita:** `(reservoirRemaining / reservoirVolume) * 100` quando `reservoirVolume` é 0 resultaria em Infinity.
+- **Refutação:** A expressão está dentro de um ternário `reservoirVolume > 0 ? ... : 0` (L347), então quando `reservoirVolume` é 0, o resultado é 0 sem nunca executar a divisão.
 
-### FP5. Bundle dessincronizado com o fonte
-- **Suspeita:** O bundle buildado poderia estar dessincronizado com o fonte TypeScript.
-- **Refutação:** `npm run build` regenerou o bundle e o `git diff --stat` permaneceu idêntico (300 ++++++++++++++-------), confirmando que o bundle no working tree já refletia o fonte atual.
+### FP-5. Bundle dessincronizado com o fonte
+- **Suspeita:** O bundle `irrigation-schedule-card.js` poderia estar desatualizado em relação ao fonte TypeScript.
+- **Refutação:** `npm run build` regenerou o bundle e `git diff --ignore-cr-at-eol` mostrou zero diferenças de conteúdo (apenas line endings CRLF/LF, esperado no Windows). O bundle está perfeitamente sincronizado.
 
 ---
 
 ## Testes executados
 
-| Comando | Resultado |
-|---|---|
-| `& "$env:TEMP\opencode\irr-venv\Scripts\python.exe" -m pytest tests/test_next_run.py tests/test_schedules.py -q` | **36 passed** em 0.03s |
-| `& "$env:TEMP\opencode\ha-venv\Scripts\python.exe" -m pytest tests -q` | **176 passed** em 15.04s |
-| `npm run typecheck` (frontend-src) | **OK** (sem erros) |
-| `npm run test` (frontend-src) | **155 passed** (3 test files, 706ms) |
-| `npm run build` (frontend-src) | **OK** (bundle regenerado com sucesso) |
-| `& "$env:TEMP\opencode\ha-venv\Scripts\python.exe" -m compileall -q custom_components` | **OK** (sem erros de compilação) |
+| Suite | Comando | Resultado | Tempo |
+|-------|---------|-----------|-------|
+| Backend puro (next_run + schedules) | `pytest tests/test_next_run.py tests/test_schedules.py -q` | **36 passed** | 0.03s |
+| Backend HA (todos) | `pytest tests -q` | **176 passed** | 14.93s |
+| Frontend typecheck | `npm run typecheck` | **OK** (zero erros) | ~3s |
+| Frontend test | `npm run test` | **161 passed** (3 files: card 61, editor 5, utils 95) | 673ms |
+| Frontend build | `npm run build` | **OK** (bundle gerado, sync confirmado) | ~1s |
+| Python compileall | `python -m compileall -q custom_components` | **OK** (zero erros) | ~2s |
 
-**Total: 367 testes, 0 falhas.**
+**Total: 373 testes, 0 falhas.**
 
 ---
 
@@ -139,16 +121,4 @@ Nenhum.
 
 ### APROVADO
 
-Nenhum achado CRITICO, ALTO ou MEDIO. Dois achados BAIXO (inconsistências menores de `type="button"` e `aria-label`) e três INFORMATIVOS (version bump, plano.md, CheckableElement). Todos os testes passam (backend puro, backend HA, frontend typecheck, frontend unit tests, build). O bundle está em sincronia com o fonte. A inversão de estado nos toggles está correta. A acessibilidade (role/aria-checked/focus-visible/keyboard) está funcionalmente correta.
-
----
-
-## Resumo dos achados
-
-| Severidade | Descrição |
-|---|---|
-| BAIXO | `type="button"` ausente em 3 botões customizados (toggles + add-schedule-button); inconsistente com o watering-stop-button que já o possui |
-| BAIXO | `aria-label` do master toggle descreve o estado, enquanto o schedule toggle descreve a ação — inconsistência de UX |
-| INFORMATIVO | Version bump 0.11.1 → 0.11.6 (pulo de 4 versões intermediárias, inofensivo) |
-| INFORMATIVO | `plano.md` não rastreado (documento de planejamento para light_scheduler, sem código) |
-| INFORMATIVO | `CheckableElement` interface ainda em uso (não é dead code) |
+O restyle do card (commit `3ce5397`) é sólido. Todos os 373 testes passam, o bundle está sincronizado com o fonte, e a análise adversarial não encontrou bugs funcionais. Os dois achados BAIXO (CSS duplicado e inconsistência rem/px nos diálogos) são questões de manutenção/consistência, não defeitos. Nenhum achado CRITICO, ALTO ou MEDIO.
