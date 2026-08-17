@@ -96,7 +96,7 @@ card.hass = {
 };
 await card.updateComplete;
 const wateringText = card.shadowRoot.textContent;
-console.log("watering status Regando:", wateringText.includes("Regando"));
+console.log("watering timer restantes:", wateringText.includes("restantes"));
 console.log("stop button Parar:", wateringText.includes("Parar"));
 console.log("countdown MM:SS:", /[0-5]\d:[0-5]\d/.test(wateringText));
 
@@ -108,7 +108,7 @@ document.body.appendChild(bad);
 await bad.updateComplete;
 console.log("config error message:", bad.shadowRoot.textContent.includes("não encontrada"));
 
-if (!wateringText.includes("Regando") || !wateringText.includes("Parar")) {
+if (!wateringText.includes("restantes") || !wateringText.includes("Parar")) {
   throw new Error("watering UI did not render");
 }
 if (!bad.shadowRoot.textContent.includes("não encontrada")) {

@@ -466,42 +466,6 @@ export class IrrigationScheduleCard extends LitElement {
           ecEntityId2,
         )}
 
-        ${wateringOn && finishesAt
-          ? html`
-              <div class="watering-bar">
-                <div class="watering-info">
-                  <div class="watering-left">
-                    <span class="watering-dot"></span>
-                    <span>
-                      Regando${activeSource === "external"
-                        ? ` · ${sourceLabel(activeSource)}`
-                        : ""}
-                    </span>
-                  </div>
-                  <div class="watering-remaining">
-                    ${formatRemaining(remaining)} restantes
-                  </div>
-                </div>
-                <div class="watering-progress-row">
-                  <div class="progress-track">
-                    <div
-                      class="progress-fill"
-                      style="width: ${progress}%"
-                    ></div>
-                  </div>
-                  <button
-                    class="watering-stop-button"
-                    type="button"
-                    @click=${this._stopWatering}
-                  >
-                    <ha-icon icon="mdi:stop"></ha-icon>
-                    Parar
-                  </button>
-                </div>
-              </div>
-            `
-          : ""}
-
         ${lastRun
           ? html`
               <div class="last-run" @click=${this._openHistory}>
@@ -595,20 +559,49 @@ export class IrrigationScheduleCard extends LitElement {
             Adicionar horário
           </button>
 
-          ${showWaterNow
+          ${showWaterNow || (wateringOn && finishesAt)
             ? html`
-                <div class="actions">
-                  <button
-                    class="water-now-button"
-                    type="button"
-                    title="Regar agora"
-                    aria-label="Regar agora"
-                    ?disabled=${wateringOn}
-                    @click=${this._waterNow}
-                  >
-                    <ha-icon icon="mdi:play"></ha-icon>
-                    Regar agora
-                  </button>
+                <div class="actions ${wateringOn && finishesAt ? "watering" : ""}">
+                  ${wateringOn && finishesAt
+                    ? html`
+                        <div class="water-now-progress">
+                          <div class="water-now-timer">
+                            ${formatRemaining(remaining)} restantes${activeSource ===
+                            "external"
+                              ? ` · ${sourceLabel(activeSource)}`
+                              : ""}
+                          </div>
+                          <div class="progress-track">
+                            <div
+                              class="progress-fill"
+                              style="width: ${progress}%"
+                            ></div>
+                          </div>
+                        </div>
+                        <button
+                          class="water-now-button stop"
+                          type="button"
+                          title="Parar rega"
+                          aria-label="Parar rega"
+                          @click=${this._stopWatering}
+                        >
+                          <ha-icon icon="mdi:stop"></ha-icon>
+                          Parar
+                        </button>
+                      `
+                    : html`
+                        <button
+                          class="water-now-button"
+                          type="button"
+                          title="Regar agora"
+                          aria-label="Regar agora"
+                          ?disabled=${wateringOn}
+                          @click=${this._waterNow}
+                        >
+                          <ha-icon icon="mdi:play"></ha-icon>
+                          Regar agora
+                        </button>
+                      `}
                 </div>
               `
             : ""}

@@ -935,9 +935,9 @@ describe("IrrigationScheduleCard last run + history dialog", () => {
       [],
     );
 
-    const bar = card.shadowRoot?.querySelector(".watering-left");
-    expect(bar?.textContent).toContain("Regando");
-    expect(bar?.textContent).toContain("ativada no dispositivo");
+    const timer = card.shadowRoot?.querySelector(".water-now-timer");
+    expect(timer?.textContent).toContain("restantes");
+    expect(timer?.textContent).toContain("ativada no dispositivo");
   });
 
   it("renders the last-run row from last_run, clickable to open the history dialog", async () => {

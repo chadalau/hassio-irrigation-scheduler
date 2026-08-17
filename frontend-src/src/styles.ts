@@ -73,7 +73,6 @@ export const cardStyles = css`
     border: 0;
     border-radius: 50%;
     background: transparent;
-    color: var(--secondary-text-color);
     cursor: pointer;
   }
 
@@ -415,60 +414,22 @@ export const cardStyles = css`
     white-space: nowrap;
   }
 
-  .watering-bar {
-    /* 16px matches the horizontal inset every other section uses (.header,
-       .card-body, .summary, .last-run) so the progress bar lines up with the
-       text above and the schedule boxes below. */
-    margin: 10px 16px 0;
+  .water-now-progress {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
   }
 
-  .watering-info {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
+  .water-now-timer {
+    font-size: 9px;
+    line-height: 1;
     color: var(--secondary-text-color);
-    font-size: 10px;
-  }
-
-  .watering-left {
-    display: flex;
-    align-items: center;
-    min-width: 0;
-  }
-
-  /* The ellipsis has to live on the text element itself: .watering-left is a
-     flex container, and text-overflow only applies to the block container the
-     text actually overflows -- on the flex parent it would be a no-op. */
-  .watering-left span:not(.watering-dot) {
-    min-width: 0;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .watering-dot {
-    display: inline-block;
-    width: 7px;
-    height: 7px;
-    margin-right: 5px;
-    border-radius: 50%;
-    background: var(--w-green);
-    flex-shrink: 0;
-  }
-
-  .watering-remaining {
-    font-variant-numeric: tabular-nums;
-    color: var(--primary-color, #03a9f4);
-    white-space: nowrap;
-  }
-
-  .watering-progress-row {
-    margin-top: 7px;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 88px;
-    align-items: center;
-    gap: 10px;
   }
 
   .progress-track {
@@ -483,24 +444,6 @@ export const cardStyles = css`
     border-radius: inherit;
     background: var(--primary-color, #03a9f4);
     transition: width 1s linear;
-  }
-
-  .watering-stop-button {
-    height: 31px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    border: 1px solid rgba(127, 127, 127, 0.32);
-    border-radius: 5px;
-    background: transparent;
-    color: var(--w-blue);
-    font-size: 11px;
-    cursor: pointer;
-  }
-
-  .watering-stop-button ha-icon {
-    --mdc-icon-size: 13px;
   }
 
   .schedules {
@@ -762,6 +705,10 @@ export const cardStyles = css`
     margin-top: 9px;
   }
 
+  .actions.watering {
+    gap: 10px;
+  }
+
   .water-now-button {
     height: 31px;
     padding: 0 13px;
@@ -786,6 +733,17 @@ export const cardStyles = css`
 
   .water-now-button ha-icon {
     --mdc-icon-size: 15px;
+  }
+
+  .water-now-button.stop {
+    background: transparent;
+    border: 1px solid rgba(127, 127, 127, 0.32);
+    color: var(--w-blue);
+    font-weight: 500;
+  }
+
+  .water-now-button.stop ha-icon {
+    --mdc-icon-size: 13px;
   }
 
   .config-error {
