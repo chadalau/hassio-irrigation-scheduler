@@ -183,6 +183,17 @@ class IrrigationScheduler:
         # (either through a retry or through the state listener).
         self._watchdog_active = False
         self._watchdog_attempt = 0
+        # The run this watchdog was armed FOR. Every late action it takes (the
+        # physical turn_off and the Store settle) is gated on the runtime
+        # record still carrying this exact run_uid, so a callback that outlives
+        # its own run can never act on somebody else's.
+        self._watchdog_run_uid: str | None = None
+
+        # Set once async_unload() starts. A scheduler being torn down must not
+        # arm ANY new callback: async_call_later is not tied to the config
+        # entry, so a timer armed during unload outlives this object and would
+        # fire against the instance the reload just created.
+        self._unloaded = False
 
         # Active run state (in-memory mirror of the store).
         self._is_watering = False
@@ -623,6 +634,16 @@ class IrrigationScheduler:
 
     async def async_unload(self) -> None:
         """Cancel all timers/listeners and stop watering (unless HA is stopping)."""
+        # Flagged FIRST: _async_finish_run below can reach the "target could
+        # not be confirmed off" branch, which arms a FRESH watchdog. An
+        # async_call_later is not bound to the config entry, so that timer
+        # would outlive this scheduler and fire with ``self`` still pointing at
+        # the discarded instance -- turning off a target the RELOADED instance
+        # may already be watering, and settling a Store record that by then
+        # belongs to its run. Nothing is lost by refusing to arm here: the
+        # record survives in the Store and the reloaded instance arms its own
+        # watchdog from it in _async_recover_state.
+        self._unloaded = True
         self._cancel_next()
         self._cancel_stop()
         self._cancel_actuation()
@@ -640,7 +661,12 @@ class IrrigationScheduler:
                     "Home Assistant is stopping; leaving watering state in store"
                 )
                 return
-            await self._async_finish_run(turn_off=True, remove_state=True)
+            try:
+                await self._async_finish_run(turn_off=True, remove_state=True)
+            finally:
+                # Belt and braces: the flag above already refuses to arm, but a
+                # timer must never survive this method by any path.
+                self._async_clear_shutdown_watchdog()
 
     # ------------------------------------------------------------------
     # Public control methods
@@ -1290,7 +1316,7 @@ class IrrigationScheduler:
                 remove_state = False
                 # ...and keep trying in THIS session too, instead of leaving a
                 # possibly-open target unwatched until the next boot.
-                self._async_arm_shutdown_watchdog()
+                self._async_arm_shutdown_watchdog(history_run_uid)
 
         # A new run may have started while the old target command was in
         # flight. Its target/store must be left alone, but the immutable
@@ -1331,7 +1357,7 @@ class IrrigationScheduler:
         self._reschedule_next()
         self._async_dispatch_update()
 
-    async def _async_store_mark_actuated(self) -> None:
+    async def _async_store_mark_actuated(self, run_uid: str | None = None) -> None:
         """Persist that THIS run's target has been confirmed actuated.
 
         Called at every point the in-memory sticky ``_active_actuated`` flag
@@ -1349,10 +1375,19 @@ class IrrigationScheduler:
         locked load(), so whichever saved last silently clobbered the
         other's field (reproduced with a forced interleaving before this
         fix).
+
+        ``run_uid`` is captured by the caller at the moment the actuation was
+        OBSERVED and makes the write a no-op if the record changed hands in
+        the meantime. Without it, a callback that waited on the Store lock
+        while its own run ended could stamp ``actuated=True`` on the NEXT
+        run's record -- and after a crash, restart recovery would then count a
+        run that may never have opened the target as real delivered water.
         """
 
         def _mutate(run_state: dict[str, Any] | None) -> dict[str, Any] | None:
             if run_state is None or run_state.get("actuated"):
+                return None
+            if run_uid is not None and run_state.get("run_uid") != run_uid:
                 return None
             run_state["actuated"] = True
             return run_state
@@ -1466,6 +1501,10 @@ class IrrigationScheduler:
 
     async def _async_abort_run(self) -> None:
         """Abort a run whose target could not be actuated (fail loudly)."""
+        # Captured before the state is torn down below: the watchdog armed at
+        # the end of this method needs to know WHICH run's record it is
+        # watching (see _async_watchdog_owns_record).
+        aborted_run_uid = self._active_run_uid
         self._cancel_stop()
         self._cancel_actuation()
         self._run_id += 1
@@ -1500,7 +1539,7 @@ class IrrigationScheduler:
             )
             # ...and keep trying in THIS session too (see
             # _async_arm_shutdown_watchdog).
-            self._async_arm_shutdown_watchdog()
+            self._async_arm_shutdown_watchdog(aborted_run_uid)
         self._reschedule_next()
         self._async_dispatch_update()
 
@@ -1526,7 +1565,7 @@ class IrrigationScheduler:
             return
         if self._async_target_is_actuated():
             self._active_actuated = True
-            await self._async_store_mark_actuated()
+            await self._async_store_mark_actuated(self._active_run_uid)
             return
 
         service_domain, turn_on_service, _ = resolve_target_services(
@@ -1746,7 +1785,7 @@ class IrrigationScheduler:
             # history in _async_finish_run instead of being confused with a
             # target that never actuated at all.
             self._active_actuated = True
-            await self._async_store_mark_actuated()
+            await self._async_store_mark_actuated(self._active_run_uid)
             return
         if current is None or current.state not in confirmed_off_states(
             self.target_domain
@@ -1972,7 +2011,7 @@ class IrrigationScheduler:
     # ------------------------------------------------------------------
     # Shutdown watchdog (target preserved as possibly-open)
     # ------------------------------------------------------------------
-    def _async_arm_shutdown_watchdog(self) -> None:
+    def _async_arm_shutdown_watchdog(self, run_uid: str | None = None) -> None:
         """Watch a target that could not be CONFIRMED off, in THIS session.
 
         Called from every path that preserves the runtime store record because
@@ -1982,8 +2021,30 @@ class IrrigationScheduler:
         session retry too, instead of leaving a possibly-open valve with no
         timer, no listener action and nothing else watching it until Home
         Assistant happens to restart.
+
+        ``run_uid`` is the run the record belongs to. It is remembered so every
+        late action this watchdog takes can first check it still OWNS that
+        record (see _async_watchdog_owns_record); ``None`` is a legacy record
+        with no uid, which by the same check can never match a newer run (those
+        always persist one).
+
+        Refuses to arm once ``async_unload`` started: an async_call_later is
+        not bound to the config entry, so a timer armed while tearing down
+        outlives this object and fires against the reloaded instance.
         """
+        if self._unloaded:
+            _LOGGER.debug(
+                "Not arming the shutdown watchdog for %s: the scheduler is "
+                "being unloaded (the record stays for the next setup)",
+                self.entry.entry_id,
+            )
+            return
         self._watchdog_active = True
+        # Only the arming callers pass a uid; the re-arm between backoff steps
+        # passes nothing and must keep the one it is already watching
+        # (_async_clear_shutdown_watchdog resets it back to None).
+        if run_uid is not None:
+            self._watchdog_run_uid = run_uid
         self._cancel_watchdog()
         index = min(self._watchdog_attempt, len(SHUTDOWN_WATCHDOG_DELAYS) - 1)
         delay = SHUTDOWN_WATCHDOG_DELAYS[index]
@@ -2005,6 +2066,24 @@ class IrrigationScheduler:
         self._cancel_watchdog()
         self._watchdog_active = False
         self._watchdog_attempt = 0
+        self._watchdog_run_uid = None
+
+    async def _async_watchdog_owns_record(self) -> bool:
+        """Whether the stored record is still the run this watchdog watches.
+
+        A watchdog only ever acts on ITS OWN run: it turns a target off and
+        settles a Store record on behalf of one specific ``run_uid``, and both
+        of those are destructive if the record changed hands in the meantime
+        (a reload creating a new scheduler, or a new run claiming the entry).
+        The uid is compared against the CURRENT record rather than assumed, so
+        the answer stays right no matter how late the callback fires. A record
+        that vanished is not owned either -- somebody already settled it.
+        """
+        data = await self.store.async_load()
+        run_state = data["entries"].get(self.entry.entry_id)
+        if not run_state:
+            return False
+        return run_state.get("run_uid") == self._watchdog_run_uid
 
     async def _async_watchdog_fired(self, *_: Any) -> None:
         """A backoff step elapsed: retry the defensive shutdown."""
@@ -2037,6 +2116,18 @@ class IrrigationScheduler:
         which case the next backoff step is armed.
         """
         if self._is_watering:
+            self._async_clear_shutdown_watchdog()
+            return True
+        if not await self._async_watchdog_owns_record():
+            # The record changed hands (a reload's new scheduler, or a new run
+            # claiming the entry) or was already settled. Actuating now would
+            # close a target somebody else is legitimately watering, and
+            # settling below would eat THEIR history and reservoir accounting.
+            _LOGGER.debug(
+                "Shutdown watchdog for %s stands down: the runtime record is "
+                "no longer the run it was watching",
+                self.entry.entry_id,
+            )
             self._async_clear_shutdown_watchdog()
             return True
 
@@ -2076,6 +2167,9 @@ class IrrigationScheduler:
         """
         if not self._async_target_is_off():
             return
+        if not await self._async_watchdog_owns_record():
+            self._async_clear_shutdown_watchdog()
+            return
         _LOGGER.info(
             "Target %s reported itself off; settling the preserved runtime "
             "record for %s",
@@ -2101,6 +2195,15 @@ class IrrigationScheduler:
         data = await self.store.async_load()
         run_state = data["entries"].get(self.entry.entry_id)
         if not run_state:
+            return
+        if run_state.get("run_uid") != self._watchdog_run_uid:
+            # Not ours to settle. Logging it would attribute another run's
+            # water to this one and drop the journal it still needs.
+            _LOGGER.debug(
+                "Not settling the runtime record of %s: it belongs to a "
+                "different run than the one being resolved",
+                self.entry.entry_id,
+            )
             return
         logged = True
         if run_state.get("actuated") and not run_state.get("history_logged"):
@@ -2221,7 +2324,7 @@ class IrrigationScheduler:
                 # the target for the rest of THIS session too. The usual cause
                 # is a device still reporting ``unavailable`` seconds after
                 # startup, which the first (short) backoff step catches.
-                self._async_arm_shutdown_watchdog()
+                self._async_arm_shutdown_watchdog(run_state.get("run_uid"))
                 return True
             return False
 
@@ -2310,7 +2413,7 @@ class IrrigationScheduler:
 
             await self.store.async_update_entry(self.entry.entry_id, _add_run_uid)
         self._active_run_uid = stored_run_uid
-        await self._async_store_mark_actuated()
+        await self._async_store_mark_actuated(stored_run_uid)
         _LOGGER.info(
             "Resumed watering for %s until %s",
             self.entry.entry_id,

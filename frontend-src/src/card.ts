@@ -196,6 +196,16 @@ export class IrrigationScheduleCard extends LitElement {
     return this._config.compact ? 2 : 4;
   }
 
+  connectedCallback(): void {
+    super.connectedCallback();
+    // Reattaching the SAME element (a dashboard re-layout, a view switched
+    // away from and back) does not by itself re-render, and the ticker only
+    // ever started from `updated()`. Without this the countdown and progress
+    // bar stayed frozen at whatever second the element was detached, until
+    // some unrelated Home Assistant update happened to come in.
+    this._startTicker();
+  }
+
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this._stopTicker();
@@ -204,11 +214,7 @@ export class IrrigationScheduleCard extends LitElement {
   protected updated(changed: PropertyValues): void {
     super.updated(changed);
     if (this._isWatering()) {
-      if (this._tickerId === null) {
-        this._tickerId = window.setInterval(() => {
-          this._now = Date.now();
-        }, 1000);
-      }
+      this._startTicker();
     } else if (this._tickerId !== null) {
       this._stopTicker();
     }
@@ -1673,6 +1679,19 @@ export class IrrigationScheduleCard extends LitElement {
   // ------------------------------------------------------------------
   // Ticker
   // ------------------------------------------------------------------
+
+  /** Start the one-second countdown, if a run is active and it is not running. */
+  private _startTicker(): void {
+    if (this._tickerId !== null || !this._isWatering()) {
+      return;
+    }
+    // Seeded immediately so a reattached card shows the CURRENT remaining
+    // time instead of the "no tick yet" fallback for up to a second.
+    this._now = Date.now();
+    this._tickerId = window.setInterval(() => {
+      this._now = Date.now();
+    }, 1000);
+  }
 
   private _stopTicker(): void {
     if (this._tickerId !== null) {

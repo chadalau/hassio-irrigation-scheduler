@@ -361,3 +361,47 @@ async def test_target_unavailable_mid_run_does_not_end_run_or_discard_store(
     await hass.async_block_till_done()
     assert not scheduler.is_watering
     assert len(turn_off_calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# M2 (auditoria v0.12.0) - the "actuated" mark must belong to ONE run
+# ---------------------------------------------------------------------------
+async def test_mark_actuated_never_stamps_another_runs_record(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """REGRESSION: _async_store_mark_actuated mutated whatever record occupied
+    the entry_id, without comparing run_uid.
+
+    A confirmation callback that waited on the Store lock while its own run
+    ended could therefore stamp ``actuated=True`` on the NEXT run's record --
+    and restart recovery would then count a run that may never have opened the
+    target as real delivered water.
+    """
+    entry = await setup_zone(target_entity_id="switch.zone1", name="Garden")
+    scheduler = scheduler_of(entry)
+    store = hass.data[DOMAIN]["store"]
+
+    # A record that belongs to somebody else, not yet actuated.
+    await store.async_save_entry(
+        entry.entry_id,
+        {
+            "started_at": dt_util.utcnow().isoformat(),
+            "finishes_at": (dt_util.utcnow() + timedelta(minutes=10)).isoformat(),
+            "duration": 600,
+            "source": "manual",
+            "schedule_id": None,
+            "run_uid": "SOMEBODY-ELSES-RUN",
+            "actuated": False,
+            "history_logged": False,
+        },
+    )
+
+    # A late confirmation from a DIFFERENT run must not touch it.
+    await scheduler._async_store_mark_actuated("A-RUN-THAT-ALREADY-ENDED")
+    data = await store.async_load()
+    assert data["entries"][entry.entry_id]["actuated"] is False
+
+    # The owner's own confirmation still works.
+    await scheduler._async_store_mark_actuated("SOMEBODY-ELSES-RUN")
+    data = await store.async_load()
+    assert data["entries"][entry.entry_id]["actuated"] is True

@@ -256,3 +256,155 @@ async def test_new_run_settles_the_pending_record_instead_of_overwriting_it(
     assert data["entries"][entry_id]["source"] == "manual"
     # ...but the interrupted run's accounting was preserved first.
     assert [run["run_uid"] for run in scheduler.history] == ["ORIGINAL-RUN-UID"]
+
+
+# ---------------------------------------------------------------------------
+# A1 (auditoria v0.12.0) - a watchdog must never outlive its own scheduler
+# ---------------------------------------------------------------------------
+async def test_unload_never_leaves_a_watchdog_behind(
+    hass: HomeAssistant, hass_storage
+) -> None:
+    """REGRESSION: async_unload cleared the watchdog BEFORE _async_finish_run,
+    and that very call re-arms one when the target cannot be confirmed off.
+
+    async_call_later is not bound to the config entry, so the timer survived
+    the unload holding a reference to the discarded scheduler. On the reload
+    that follows it would fire against the NEW instance's target and Store
+    record: closing a run it does not own and eating its history/deduction.
+    """
+
+    @callback
+    def _turn_off(call):
+        # Never confirms: the target stays ON through the whole unload.
+        return
+
+    hass.services.async_register("homeassistant", "turn_off", _turn_off)
+    hass.services.async_register("homeassistant", "turn_on", lambda call: None)
+    hass.states.async_set("switch.zone1", STATE_ON)
+
+    entry = _base_entry("watchdog_unload")
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
+    assert sensor_eid
+    await hass.services.async_call(
+        DOMAIN, SERVICE_WATER_NOW, {"entity_id": sensor_eid}, blocking=True
+    )
+    await hass.async_block_till_done()
+    old_scheduler = scheduler_of(entry)
+    assert old_scheduler.is_watering
+
+    # Unload while watering, with a target that never confirms off.
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    # No timer may survive the unload, by any path.
+    assert old_scheduler._unsub_watchdog is None
+    assert not old_scheduler._watchdog_active
+
+
+async def test_reload_survives_an_orphaned_watchdog_window(
+    hass: HomeAssistant, hass_storage
+) -> None:
+    """The same regression end to end: unload with an unconfirmed shutdown,
+    reload, start a new run, then advance past every backoff step. The new
+    run must still be watering and still own its Store record."""
+    off_calls: list[str] = []
+
+    @callback
+    def _turn_off(call):
+        off_calls.append(call.data["entity_id"])
+
+    hass.services.async_register("homeassistant", "turn_off", _turn_off)
+    hass.services.async_register("homeassistant", "turn_on", lambda call: None)
+    hass.states.async_set("switch.zone1", STATE_ON)
+
+    entry = _base_entry("watchdog_reload")
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
+    assert sensor_eid
+    await hass.services.async_call(
+        DOMAIN, SERVICE_WATER_NOW, {"entity_id": sensor_eid}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    # A brand-new run on the reloaded instance.
+    sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
+    assert sensor_eid
+    await hass.services.async_call(
+        DOMAIN, SERVICE_WATER_NOW, {"entity_id": sensor_eid}, blocking=True
+    )
+    await hass.async_block_till_done()
+    new_scheduler = scheduler_of(entry)
+    assert new_scheduler.is_watering
+    new_run_uid = new_scheduler._active_run_uid
+
+    off_calls.clear()
+    for delay in SHUTDOWN_WATCHDOG_DELAYS:
+        async_fire_time_changed_exact(
+            hass, dt_util.utcnow() + timedelta(seconds=delay + 1)
+        )
+        await hass.async_block_till_done()
+
+    # No stale callback closed the new run, and its record is intact.
+    assert off_calls == []
+    assert new_scheduler.is_watering
+    data = await hass.data[DOMAIN]["store"].async_load()
+    assert data["entries"][entry.entry_id]["run_uid"] == new_run_uid
+    # Nor was the new run logged as finished by somebody else.
+    assert new_scheduler.history == []
+
+
+async def test_watchdog_stands_down_when_the_record_changed_hands(
+    hass: HomeAssistant, hass_storage
+) -> None:
+    """Ownership check in isolation: a watchdog whose record was replaced by
+    another run neither actuates nor settles anything."""
+    off_calls: list[str] = []
+
+    @callback
+    def _turn_off(call):
+        off_calls.append(call.data["entity_id"])
+
+    hass.services.async_register("homeassistant", "turn_off", _turn_off)
+    hass.states.async_set("switch.zone1", STATE_ON)
+
+    entry_id = "watchdog_handover"
+    _populate_store(hass_storage, entry_id, _stale_run())
+    entry = _base_entry(entry_id)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    scheduler = scheduler_of(entry)
+    assert scheduler._watchdog_active
+    assert scheduler._watchdog_run_uid == "ORIGINAL-RUN-UID"
+
+    # Somebody else claims the entry (simulating the record changing hands
+    # while the watchdog callback was still pending).
+    store = hass.data[DOMAIN]["store"]
+    await store.async_save_entry(
+        entry_id, _stale_run(run_uid="SOMEBODY-ELSES-RUN", history_logged=False)
+    )
+
+    off_calls.clear()
+    async_fire_time_changed_exact(
+        hass, dt_util.utcnow() + timedelta(seconds=SHUTDOWN_WATCHDOG_DELAYS[0] + 1)
+    )
+    await hass.async_block_till_done()
+
+    # It stood down: no turn_off, no history, and the other run's record kept.
+    assert off_calls == []
+    assert scheduler.history == []
+    data = await store.async_load()
+    assert data["entries"][entry_id]["run_uid"] == "SOMEBODY-ELSES-RUN"
+    assert not scheduler._watchdog_active

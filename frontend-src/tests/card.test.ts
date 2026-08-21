@@ -1067,6 +1067,61 @@ describe("IrrigationScheduleCard last run + history dialog", () => {
   });
 });
 
+describe("IrrigationScheduleCard ticker lifecycle", () => {
+  function wateringStates(): Record<string, HassEntity> {
+    const now = Date.now();
+    return {
+      "sensor.jardim_next_run": baseSensor(),
+      "binary_sensor.jardim_watering": {
+        ...baseBinarySensor({
+          started_at: new Date(now - 60_000).toISOString(),
+          finishes_at: new Date(now + 540_000).toISOString(),
+          duration: 600,
+          source: "manual",
+        }),
+        state: "on",
+      },
+    };
+  }
+
+  it("restarts the countdown when the same element is reattached", async () => {
+    // REGRESSION: disconnectedCallback stopped the interval but there was no
+    // connectedCallback to start it again, and the ticker only ever started
+    // from updated(). Reattaching the same element left the countdown frozen
+    // until some unrelated hass update arrived. Verified to fail against the
+    // pre-fix card and pass after it -- do not "simplify" this by trusting
+    // Lit to flush a deferred update on reconnect; it does not restart the
+    // interval on its own.
+    const card = await mountCard(wateringStates(), []);
+    const withTicker = card as unknown as { _tickerId: number | null };
+    expect(withTicker._tickerId).not.toBeNull();
+
+    card.remove();
+    expect(withTicker._tickerId).toBeNull();
+
+    document.body.appendChild(card);
+    await card.updateComplete;
+    expect(withTicker._tickerId).not.toBeNull();
+  });
+
+  it("does not start a ticker for a zone that is not watering", async () => {
+    const card = await mountCard(
+      {
+        "sensor.jardim_next_run": baseSensor(),
+        "binary_sensor.jardim_watering": baseBinarySensor(),
+      },
+      [],
+    );
+    const withTicker = card as unknown as { _tickerId: number | null };
+    expect(withTicker._tickerId).toBeNull();
+
+    card.remove();
+    document.body.appendChild(card);
+    await card.updateComplete;
+    expect(withTicker._tickerId).toBeNull();
+  });
+});
+
 describe("IrrigationScheduleCard history entry readings", () => {
   function renderEntry(entry: HistoryRun): string {
     const card = makeCard();
