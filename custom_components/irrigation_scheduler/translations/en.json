@@ -43,11 +43,15 @@
           "number_of_pots": "Number of pots (optional)",
           "reservoir_volume_l": "Reservoir volume (L, optional)",
           "ph_entity_id": "pH sensor (optional)",
+          "clear_ph_entity_id": "Remove the pH sensor (disables the pH gate)",
           "ec_entity_id": "EC sensor (optional, display only)",
+          "clear_ec_entity_id": "Remove the EC sensor",
           "ph_min": "Minimum pH to water",
           "ph_max": "Maximum pH to water",
           "ph_entity_id_2": "R2 pH sensor (optional, second reservoir)",
+          "clear_ph_entity_id_2": "Remove the R2 pH sensor (disables its gate)",
           "ec_entity_id_2": "R2 EC sensor (optional, display only)",
+          "clear_ec_entity_id_2": "Remove the R2 EC sensor",
           "ph_min_2": "R2 minimum pH to water",
           "ph_max_2": "R2 maximum pH to water"
         }
@@ -56,7 +60,8 @@
     "error": {
       "default_duration_too_high": "Default duration must not exceed the max duration.",
       "ph_min_too_high": "Minimum pH must not be greater than maximum pH.",
-      "ph_min_too_high_2": "R2 minimum pH must not be greater than R2 maximum pH."
+      "ph_min_too_high_2": "R2 minimum pH must not be greater than R2 maximum pH.",
+      "clear_and_select_conflict": "You ticked \"remove\" for a sensor and picked a different one in the same save. Do one or the other."
     }
   },
   "entity": {

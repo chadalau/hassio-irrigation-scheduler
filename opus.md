@@ -271,9 +271,14 @@ caminho é muito pior. Nenhum dos dois testes (o antigo ou o meu) prova o que o 
 realmente envia; ambos montam `user_input` na mão. Sem essa evidência, a opção conservadora
 é a correta.
 
-**Se um dia quiserem limpar pelo options flow**, o caminho seguro é um checkbox explícito
-("remover sensor de pH"), para que a limpeza seja **declarada** em vez de inferida da
-ausência da chave. `vol.Optional(chave, default="")` não serve: o `EntitySelector` rejeita `""`.
+**A limitação real que o M2 descrevia — a UI de opções não conseguir remover um sensor —
+foi resolvida depois, do jeito seguro:** um checkbox explícito "remover sensor" ao lado de
+cada sensor configurado (`clear_ph_entity_id` e companheiros), de modo que a limpeza é
+**declarada** em vez de inferida da ausência da chave. A leitura conservadora da chave
+ausente continua intacta, então o modo de falha perigoso nunca existe. Marcar "remover" e
+escolher uma entidade diferente no mesmo save volta como erro em vez de honrar um dos dois
+silenciosamente, e o checkbox só aparece quando há o que remover.
+`vol.Optional(chave, default="")` continua não servindo: o `EntitySelector` rejeita `""`.
 
 ### M3 — `_suppress_options_dispatch_once` pode ficar preso e engolir a PRÓXIMA atualização
 

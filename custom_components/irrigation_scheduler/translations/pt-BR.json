@@ -43,11 +43,15 @@
           "number_of_pots": "Número de vasos (opcional)",
           "reservoir_volume_l": "Volume do reservatório (L, opcional)",
           "ph_entity_id": "Sensor de pH (opcional)",
+          "clear_ph_entity_id": "Remover o sensor de pH (desativa o portão de pH)",
           "ec_entity_id": "Sensor de EC (opcional, só exibição)",
+          "clear_ec_entity_id": "Remover o sensor de EC",
           "ph_min": "pH mínimo para regar",
           "ph_max": "pH máximo para regar",
           "ph_entity_id_2": "Sensor de pH R2 (opcional, segundo reservatório)",
+          "clear_ph_entity_id_2": "Remover o sensor de pH R2 (desativa o portão dele)",
           "ec_entity_id_2": "Sensor de EC R2 (opcional, só exibição)",
+          "clear_ec_entity_id_2": "Remover o sensor de EC R2",
           "ph_min_2": "pH mínimo R2 para regar",
           "ph_max_2": "pH máximo R2 para regar"
         }
@@ -56,7 +60,8 @@
     "error": {
       "default_duration_too_high": "A duração padrão não pode exceder a duração máxima.",
       "ph_min_too_high": "O pH mínimo não pode ser maior que o pH máximo.",
-      "ph_min_too_high_2": "O pH mínimo R2 não pode ser maior que o pH máximo R2."
+      "ph_min_too_high_2": "O pH mínimo R2 não pode ser maior que o pH máximo R2.",
+      "clear_and_select_conflict": "Você marcou \"remover\" para um sensor e escolheu outro no mesmo salvamento. Faça uma coisa de cada vez."
     }
   },
   "entity": {

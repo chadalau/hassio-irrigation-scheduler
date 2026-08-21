@@ -117,20 +117,28 @@ Abre o fluxo para editar as opcoes de uma zona existente.
 Edita duracao padrao, duracao maxima, vazao por vaso, numero de vasos, volume
 do reservatorio, o gate de pH e o sensor de EC sem interromper uma rega em
 andamento. Rejeita `default_duration > max_duration` e `ph_min > ph_max`.
-`ph_entity_id`/`ec_entity_id` (e as versoes R2) usam
-`user_input.get(chave, valor_atual)`: uma chave AUSENTE preserva o que ja esta
-configurado. A ausencia e genuinamente AMBIGUA (o frontend omite o campo tanto
-quando o usuario o limpou quanto quando ele nao foi tocado), e a escolha e pela
-assimetria das consequencias: ler ausencia como "limpar" desativaria
-silenciosamente o gate de pH num save qualquer -- a zona passaria a regar sem
-checar pH, sem ninguem perceber -- enquanto ler como "nao mexer" custa apenas
-nao poder limpar o sensor POR ESTE formulario; o dialogo de configuracoes do
-card ja limpa, mandando `ph_entity_id=""` explicitamente via
-`set_zone_options`. Travado por
+`ph_entity_id`/`ec_entity_id` (e as versoes R2) sao resolvidos por
+`_resolve_sensor`, que devolve `(valor, conflito)` a partir de tres casos, nesta
+ordem: checkbox "remover" marcado -> `""`; entidade presente no payload -> ela
+(substituicao, ou o proprio `suggested_value` devolvido); chave AUSENTE ->
+valor atual, ou seja, nao mexe.
+
+Uma chave ausente e genuinamente AMBIGUA -- o frontend omite o campo tanto
+quando o usuario o limpou quanto quando nao foi tocado -- e le-la como "limpar"
+desativaria silenciosamente o gate de pH num save qualquer, fazendo a zona regar
+sem checar pH. Por isso a leitura conservadora esta travada por
 `test_options_flow_preserves_ph_ec_when_keys_omitted` (achado A1 da rodada de
-2026-08-12). Limpar pelo options flow exigiria um checkbox explicito ("remover
-sensor"), para a limpeza ser declarada em vez de inferida;
-`vol.Optional(chave, default="")` nao serve, o `EntitySelector` rejeita `""`.
+2026-08-12), e a remocao e DECLARADA por um checkbox
+(`clear_ph_entity_id`/`clear_ec_entity_id` e as versoes `_2`) em vez de inferida.
+`vol.Optional(chave, default="")` nao serviria: o `EntitySelector` rejeita `""`.
+
+Cada checkbox so e renderizado quando aquele sensor esta configurado
+(`_clear_field` devolve um dict de 0 ou 1 entrada, encaixado logo apos o campo a
+que pertence), entao uma zona sem sensores nao ve nenhum. Marcar "remover" E
+escolher uma entidade DIFERENTE no mesmo save e contraditorio e volta como erro
+`clear_and_select_conflict`, em vez de honrar um dos dois silenciosamente --
+marcar com o campo ainda mostrando o sensor configurado e o caso normal, nao
+conflito.
 
 ### `scheduler.py`
 

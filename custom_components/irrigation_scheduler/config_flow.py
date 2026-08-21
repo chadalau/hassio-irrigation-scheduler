@@ -51,6 +51,27 @@ MAX_DURATION_MINUTES = DEFAULT_MAX_DURATION // 60
 
 _TARGET_DOMAINS = ["switch", "valve", "input_boolean", "light"]
 
+# Transient options-form fields (never persisted): an explicit "remove this
+# sensor" checkbox next to each configured pH/EC entity.
+#
+# They exist because an ABSENT entity key in ``user_input`` is ambiguous --
+# the frontend omits the field both when the user cleared it and when it was
+# never touched -- and resolving that ambiguity by guessing is exactly what
+# must not happen here: guessing "cleared" would silently disable the pH gate
+# on an ordinary save and let a zone water without ever checking pH (see the
+# long comment in async_step_init, and
+# test_options_flow_preserves_ph_ec_when_keys_omitted). A checkbox makes the
+# removal STATED instead of inferred, which is the only unambiguous way to
+# express it in a data_entry_flow form. ``vol.Optional(key, default="")``
+# cannot: EntitySelector rejects "".
+#
+# Each one is only rendered when that sensor is actually configured, so a zone
+# with no sensors sees no extra checkboxes at all.
+CLEAR_PH_ENTITY_ID = "clear_ph_entity_id"
+CLEAR_EC_ENTITY_ID = "clear_ec_entity_id"
+CLEAR_PH_ENTITY_ID_2 = "clear_ph_entity_id_2"
+CLEAR_EC_ENTITY_ID_2 = "clear_ec_entity_id_2"
+
 
 def _safe_int(value: Any, default: int, *, minimum: int = 0) -> int:
     """Coerce persisted options without letting a corrupt entry break UI."""
@@ -68,6 +89,47 @@ def _safe_float(value: Any, default: float) -> float:
     except (TypeError, ValueError, OverflowError):
         return default
     return parsed if math.isfinite(parsed) else default
+
+
+def _clear_field(key: str, current: str) -> dict[Any, Any]:
+    """A "remove this sensor" checkbox, or nothing when none is configured.
+
+    Returned as a 0-or-1 entry dict so it can be spliced into the options
+    schema right after the entity field it belongs to (``**_clear_field(...)``)
+    instead of piling every checkbox at the bottom of the form.
+    """
+    if not current:
+        return {}
+    return {vol.Optional(key, default=False): selector.BooleanSelector()}
+
+
+def _resolve_sensor(
+    user_input: dict[str, Any], key: str, clear_key: str, current: str
+) -> tuple[str, bool]:
+    """Resolve one optional sensor field to ``(value, conflict)``.
+
+    Three outcomes, in the order they are checked:
+
+    - the "remove" checkbox was ticked -> ``""`` (the explicit "no sensor /
+      gate disabled" value, same as the set_zone_options service uses);
+    - an entity came back in the payload -> that entity (a replacement, or the
+      unchanged suggested_value echoed back);
+    - the key is absent -> ``current``, i.e. leave it alone. An absent key is
+      NOT read as a removal; that is what the checkbox is for.
+
+    ``conflict`` flags the one combination that cannot be honored coherently:
+    the checkbox ticked while a DIFFERENT entity was picked in the same save.
+    Ticking it while the field still shows the configured entity is the normal
+    case (the form renders it via ``suggested_value``), not a conflict.
+    """
+    submitted = user_input.get(key)
+    if user_input.get(clear_key):
+        if isinstance(submitted, str) and submitted and submitted != current:
+            return current, True
+        return "", False
+    if isinstance(submitted, str) and submitted:
+        return submitted, False
+    return current, False
 
 
 class IrrigationSchedulerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -327,12 +389,39 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
             ph_max = float(user_input.get(CONF_PH_MAX, DEFAULT_PH_MAX))
             ph_min_2 = float(user_input.get(CONF_PH_MIN_2, DEFAULT_PH_MIN_2))
             ph_max_2 = float(user_input.get(CONF_PH_MAX_2, DEFAULT_PH_MAX_2))
+            # Each sensor resolves to one of: keep (the common case), replace
+            # (a different entity came back in the payload) or clear (the
+            # "remove" checkbox was ticked). ``_resolve_sensor`` also reports
+            # the contradictory combination -- remove ticked AND a different
+            # entity picked in the same save -- which is surfaced as an error
+            # instead of silently honoring one of the two.
+            ph_entity, ph_conflict = _resolve_sensor(
+                user_input, CONF_PH_ENTITY_ID, CLEAR_PH_ENTITY_ID, current_ph_entity
+            )
+            ec_entity, ec_conflict = _resolve_sensor(
+                user_input, CONF_EC_ENTITY_ID, CLEAR_EC_ENTITY_ID, current_ec_entity
+            )
+            ph_entity_2, ph_conflict_2 = _resolve_sensor(
+                user_input,
+                CONF_PH_ENTITY_ID_2,
+                CLEAR_PH_ENTITY_ID_2,
+                current_ph_entity_2,
+            )
+            ec_entity_2, ec_conflict_2 = _resolve_sensor(
+                user_input,
+                CONF_EC_ENTITY_ID_2,
+                CLEAR_EC_ENTITY_ID_2,
+                current_ec_entity_2,
+            )
+
             if default_min > max_min:
                 errors["base"] = "default_duration_too_high"
             elif ph_min > ph_max:
                 errors["base"] = "ph_min_too_high"
             elif ph_min_2 > ph_max_2:
                 errors["base"] = "ph_min_too_high_2"
+            elif ph_conflict or ec_conflict or ph_conflict_2 or ec_conflict_2:
+                errors["base"] = "clear_and_select_conflict"
             else:
                 new_options = {
                     **dict(self.config_entry.options),
@@ -343,52 +432,30 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
                     CONF_RESERVOIR_VOLUME_L: int(
                         user_input[CONF_RESERVOIR_VOLUME_L]
                     ),
-                    # ``.get(key, current)`` (NOT ``or DEFAULT``, and NOT
-                    # ``.get(key, "")``): an ABSENT key preserves whatever is
-                    # already configured.
+                    # Resolved by _resolve_sensor above: an ABSENT key always
+                    # preserves what is already configured, and removal is
+                    # expressed by the explicit "remove" checkbox, never
+                    # inferred from the absence.
                     #
                     # An absent key is genuinely AMBIGUOUS -- the frontend
                     # omits an entity field both when the user cleared it and
-                    # (depending on how the form was rendered/submitted) when
-                    # it was never touched. The two readings were weighed
-                    # against each other and this one wins on consequences,
-                    # not on elegance:
-                    #
-                    # - treating absent as "cleared" makes the options UI able
-                    #   to remove a sensor, but every save that does not echo
-                    #   the field back silently DISABLES the pH gate, and a
-                    #   zone then waters without ever checking pH. That is a
-                    #   safety-relevant regression nobody would notice until
-                    #   the warning badge stopped appearing;
-                    # - treating absent as "unchanged" costs the ability to
-                    #   clear a sensor FROM THIS FORM ONLY. The card's own
-                    #   settings dialog already clears it, by sending
-                    #   ``ph_entity_id=""`` explicitly through
-                    #   ``set_zone_options`` -- an empty string there is an
-                    #   unambiguous "disable the gate".
-                    #
-                    # Pinned by test_options_flow_preserves_ph_ec_when_keys_omitted
-                    # (finding A1 of the 2026-08-12 review round). A form-level
-                    # fix would need an explicit "remove sensor" checkbox, so
-                    # that clearing is stated rather than inferred from an
-                    # absent key; ``vol.Optional(key, default="")`` cannot
-                    # express it either, since EntitySelector rejects "".
-                    CONF_PH_ENTITY_ID: user_input.get(
-                        CONF_PH_ENTITY_ID, current_ph_entity
-                    ),
+                    # when it was never touched -- and reading it as "cleared"
+                    # would silently DISABLE the pH gate on an ordinary save,
+                    # letting a zone water without ever checking pH. That is a
+                    # safety-relevant regression nobody notices until the
+                    # warning badge stops appearing, which is why the
+                    # conservative reading is pinned by
+                    # test_options_flow_preserves_ph_ec_when_keys_omitted
+                    # (finding A1 of the 2026-08-12 review round) and why the
+                    # checkbox exists instead.
+                    CONF_PH_ENTITY_ID: ph_entity,
                     CONF_PH_MIN: ph_min,
                     CONF_PH_MAX: ph_max,
-                    CONF_EC_ENTITY_ID: user_input.get(
-                        CONF_EC_ENTITY_ID, current_ec_entity
-                    ),
-                    CONF_PH_ENTITY_ID_2: user_input.get(
-                        CONF_PH_ENTITY_ID_2, current_ph_entity_2
-                    ),
+                    CONF_EC_ENTITY_ID: ec_entity,
+                    CONF_PH_ENTITY_ID_2: ph_entity_2,
                     CONF_PH_MIN_2: ph_min_2,
                     CONF_PH_MAX_2: ph_max_2,
-                    CONF_EC_ENTITY_ID_2: user_input.get(
-                        CONF_EC_ENTITY_ID_2, current_ec_entity_2
-                    ),
+                    CONF_EC_ENTITY_ID_2: ec_entity_2,
                 }
                 # Saving options MUST NOT reload the entry (the update listener
                 # only recalculates the next firing).
@@ -453,6 +520,7 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
                     ): selector.EntitySelector(
                         selector.EntitySelectorConfig(domain="sensor")
                     ),
+                    **_clear_field(CLEAR_PH_ENTITY_ID, current_ph_entity),
                     vol.Optional(
                         CONF_PH_MIN, default=current_ph_min
                     ): selector.NumberSelector(
@@ -479,12 +547,14 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
                     ): selector.EntitySelector(
                         selector.EntitySelectorConfig(domain="sensor")
                     ),
+                    **_clear_field(CLEAR_EC_ENTITY_ID, current_ec_entity),
                     vol.Optional(
                         CONF_PH_ENTITY_ID_2,
                         description={"suggested_value": current_ph_entity_2 or None},
                     ): selector.EntitySelector(
                         selector.EntitySelectorConfig(domain="sensor")
                     ),
+                    **_clear_field(CLEAR_PH_ENTITY_ID_2, current_ph_entity_2),
                     vol.Optional(
                         CONF_PH_MIN_2, default=current_ph_min_2
                     ): selector.NumberSelector(
@@ -511,6 +581,7 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
                     ): selector.EntitySelector(
                         selector.EntitySelectorConfig(domain="sensor")
                     ),
+                    **_clear_field(CLEAR_EC_ENTITY_ID_2, current_ec_entity_2),
                 }
             ),
             errors=errors,

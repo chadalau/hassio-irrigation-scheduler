@@ -7,8 +7,13 @@ from homeassistant.const import STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
+from custom_components.irrigation_scheduler.config_flow import (
+    CLEAR_EC_ENTITY_ID,
+    CLEAR_PH_ENTITY_ID,
+)
 from custom_components.irrigation_scheduler.const import (
     CONF_DEFAULT_DURATION,
+    CONF_EC_ENTITY_ID,
     CONF_ENABLED,
     CONF_FLOW_RATE_LPH,
     CONF_MAX_DURATION,
@@ -202,6 +207,141 @@ async def test_options_flow_keeps_a_sensor_submitted_unchanged(
     await hass.async_block_till_done()
 
     assert entry.options[CONF_PH_ENTITY_ID] == "sensor.reservoir_ph"
+
+
+async def _open_options(hass, entry):
+    """Open the options flow and return its first form result."""
+    return await hass.config_entries.options.async_init(entry.entry_id)
+
+
+def _base_input(**overrides) -> dict:
+    """The always-required numeric fields of the options form."""
+    data = {
+        CONF_DEFAULT_DURATION: 10,
+        CONF_MAX_DURATION: 120,
+        CONF_FLOW_RATE_LPH: 0,
+        CONF_NUMBER_OF_POTS: 0,
+        CONF_RESERVOIR_VOLUME_L: 0,
+    }
+    data.update(overrides)
+    return data
+
+
+async def _zone_with_sensors(setup_zone, target: str = "switch.zone1"):
+    return await setup_zone(
+        target_entity_id=target,
+        options={
+            CONF_ENABLED: True,
+            CONF_DEFAULT_DURATION: 600,
+            CONF_MAX_DURATION: 7200,
+            CONF_PH_ENTITY_ID: "sensor.reservoir_ph",
+            CONF_EC_ENTITY_ID: "sensor.reservoir_ec",
+            CONF_SCHEDULES: [],
+        },
+    )
+
+
+async def test_options_flow_clear_checkbox_removes_the_sensor(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """The explicit "remove sensor" checkbox is what clears a sensor.
+
+    An absent entity key stays ambiguous and is never read as a removal (see
+    test_options_flow_preserves_ph_ec_when_keys_omitted); the checkbox makes
+    the removal STATED, which is the only unambiguous way to express it in a
+    data_entry_flow form.
+    """
+    entry = await _zone_with_sensors(setup_zone)
+
+    result = await _open_options(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input=_base_input(
+            # The field still carries its suggested_value: ticking "remove"
+            # next to it is the normal way a user clears the sensor.
+            **{
+                CONF_PH_ENTITY_ID: "sensor.reservoir_ph",
+                CLEAR_PH_ENTITY_ID: True,
+                CONF_EC_ENTITY_ID: "sensor.reservoir_ec",
+            }
+        ),
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+
+    assert entry.options[CONF_PH_ENTITY_ID] == ""
+    assert scheduler_of(entry).ph_entity_id == ""
+    # The untouched EC sensor is not collateral damage.
+    assert entry.options[CONF_EC_ENTITY_ID] == "sensor.reservoir_ec"
+
+
+async def test_options_flow_clear_checkbox_only_offered_when_configured(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """A zone with no sensors gets no "remove" checkboxes cluttering the form."""
+    entry = await setup_zone(
+        target_entity_id="switch.zone1",
+        options={
+            CONF_ENABLED: True,
+            CONF_DEFAULT_DURATION: 600,
+            CONF_MAX_DURATION: 7200,
+            CONF_SCHEDULES: [],
+        },
+    )
+    result = await _open_options(hass, entry)
+    keys = {str(key) for key in result["data_schema"].schema}
+    assert CLEAR_PH_ENTITY_ID not in keys
+    assert CLEAR_EC_ENTITY_ID not in keys
+
+    # ...and a zone WITH a pH sensor is offered exactly that one.
+    entry2 = await _zone_with_sensors(setup_zone, target="switch.zone2")
+    result = await _open_options(hass, entry2)
+    keys = {str(key) for key in result["data_schema"].schema}
+    assert CLEAR_PH_ENTITY_ID in keys
+    assert CLEAR_EC_ENTITY_ID in keys
+
+
+async def test_options_flow_rejects_clear_plus_a_different_sensor(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """Ticking "remove" while picking a DIFFERENT sensor is contradictory.
+
+    Silently honoring one of the two would discard an explicit choice the user
+    just made, so the form comes back with an error instead.
+    """
+    entry = await _zone_with_sensors(setup_zone)
+
+    result = await _open_options(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input=_base_input(
+            **{
+                CONF_PH_ENTITY_ID: "sensor.another_ph",
+                CLEAR_PH_ENTITY_ID: True,
+            }
+        ),
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {"base": "clear_and_select_conflict"}
+    # Nothing was written.
+    assert entry.options[CONF_PH_ENTITY_ID] == "sensor.reservoir_ph"
+
+
+async def test_options_flow_replaces_a_sensor_without_the_checkbox(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """Picking a different sensor (checkbox untouched) simply replaces it."""
+    entry = await _zone_with_sensors(setup_zone)
+
+    result = await _open_options(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input=_base_input(**{CONF_PH_ENTITY_ID: "sensor.another_ph"}),
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+
+    assert entry.options[CONF_PH_ENTITY_ID] == "sensor.another_ph"
 
 
 async def test_options_flow_opens_with_corrupt_persisted_values(
