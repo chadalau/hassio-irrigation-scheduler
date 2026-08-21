@@ -16,7 +16,8 @@ com um script isolado — não é revisão só por leitura.
 A base continua sólida: as correções do `SOL.MD`/`sonnet.md` estão todas no lugar e a disciplina de
 "nunca deixe a válvula aberta sem vigia" aparece consistentemente no código. Mesmo assim encontrei
 **3 achados de severidade alta**, **3 de severidade média** e **10 itens de código morto/limpeza** —
-nenhum deles coberto pelas suítes atuais.
+nenhum deles coberto pelas suítes atuais. Dois desses achados não sobreviveram à verificação:
+M2 (retratado, ver §3) e B9 (incorreto, ver §4).
 
 Os três achados altos são:
 
@@ -239,31 +240,40 @@ resposta. A primeira opção é uma linha e resolve o lado do banco.
 
 ---
 
-### M2 — O options flow não consegue APAGAR um sensor de pH/EC
+### M2 — ~~O options flow não consegue APAGAR um sensor de pH/EC~~ (RETRATADO)
 
-**Arquivo:** `custom_components/irrigation_scheduler/config_flow.py:353-369`
+**Arquivo:** `custom_components/irrigation_scheduler/config_flow.py`
 
-```python
-                    CONF_PH_ENTITY_ID: user_input.get(
-                        CONF_PH_ENTITY_ID, current_ph_entity
-                    ),
-```
+**Este achado estava errado, e a correção que escrevi para ele foi revertida.**
 
-O comentário explica bem a intenção (chave ausente = "não mexer"), mas o `EntitySelector` é
-`vol.Optional` **sem default**: quando o usuário **limpa** o campo na UI, o frontend simplesmente
-omite a chave — exatamente o mesmo sinal de "não mexer". Consequência: pelo fluxo de opções é
-impossível desativar o portão de pH ou remover um sensor de EC configurado por engano; o valor
-antigo volta em toda submissão.
+O relato original: `user_input.get(CONF_PH_ENTITY_ID, current_ph_entity)` torna
+"campo limpo" indistinguível de "campo intocado", então a UI de opções nunca consegue
+remover um sensor. A parte factual continua verdadeira. O que estava errado foi a conclusão
+de que isso é um defeito a corrigir invertendo o default.
 
-O caminho do card funciona (manda `ph_entity_id=""` explicitamente, e
-`async_set_zone_options` trata string vazia como "limpar"), então o recurso existe — só não está
-acessível pela UI oficial da integração.
+O que eu não vi ao escrever a §3: existe um teste de regressão explícito,
+`test_options_flow_preserves_ph_ec_when_keys_omitted`, vindo do achado A1 da rodada de
+revisão de 2026-08-12, que fixa exatamente o comportamento atual. Ele reprovou no CI e
+mostrou que o comportamento é uma decisão deliberada, já auditada — não um descuido.
 
-**Correção sugerida.** Adicionar um checkbox explícito ("remover sensor de pH") ou usar
-`description={"suggested_value": ...}` com `vol.Optional(key, default="")`, de modo que a ausência e
-o vazio deixem de ser indistinguíveis.
+E a decisão está certa, pela assimetria das consequências:
 
----
+- tratar chave ausente como "limpar" dá o poder de remover o sensor pela UI, mas
+  qualquer save em que o campo não volte no payload **desativa silenciosamente o portão
+  de pH** — a zona passa a regar sem nunca checar o pH, e ninguém percebe até o badge de
+  aviso parar de aparecer. É regressão de segurança;
+- tratar chave ausente como "não mexer" custa apenas a capacidade de limpar o sensor
+  **naquele formulário**. O diálogo de configurações do próprio card já limpa, mandando
+  `ph_entity_id=""` explicitamente via `set_zone_options`.
+
+Ou seja: a capacidade não se perde, só não está naquela UI — e o modo de falha do outro
+caminho é muito pior. Nenhum dos dois testes (o antigo ou o meu) prova o que o frontend
+realmente envia; ambos montam `user_input` na mão. Sem essa evidência, a opção conservadora
+é a correta.
+
+**Se um dia quiserem limpar pelo options flow**, o caminho seguro é um checkbox explícito
+("remover sensor de pH"), para que a limpeza seja **declarada** em vez de inferida da
+ausência da chave. `vol.Optional(chave, default="")` não serve: o `EntitySelector` rejeita `""`.
 
 ### M3 — `_suppress_options_dispatch_once` pode ficar preso e engolir a PRÓXIMA atualização
 
@@ -372,7 +382,7 @@ Todos os achados foram corrigidos, na ordem sugerida acima. Resumo do que mudou:
 | A2 | `_async_register_frontend` passou a ser chamado também em `async_setup_entry`. As duas metades foram separadas: caminho estático **uma vez por processo** (flag `DATA_CARD_PATH_REGISTERED`, porque o aiohttp rejeita rota duplicada) e `add_extra_js_url` **por entrada** (idempotente via `frozenset`). | `__init__.py` |
 | A3 | **Watchdog de desligamento**: todo caminho que preserva o registro por não conseguir confirmar o alvo desligado (recuperação no boot, laço de retry do `_async_finish_run`, `_async_abort_run`) agora arma um retry na sessão atual, com backoff `(5, 15, 30, 60, 120, 300, 600)` s. O listener liquida o registro assim que o alvo reporta desligado. Esgotado o backoff, loga erro e mantém o registro pro próximo boot (contrato antigo preservado). Além disso, `_async_start_run` liquida a contabilidade do registro pendente **antes** do `async_save_entry` que o sobrescreveria. | `scheduler.py` |
 | M3 | O flag `_suppress_options_dispatch_once` só permanece setado quando `async_update_entry` retorna `True` (ou seja, quando um listener realmente vai rodar). | `scheduler.py` |
-| M2 | No options flow, chave ausente = campo limpo pelo usuário → limpa o sensor. Seguro porque cada campo é renderizado com `suggested_value` (um campo intocado volta preenchido). | `config_flow.py` |
+| M2 | **REVERTIDO** — o achado foi retratado (ver §3). O comportamento original (chave ausente = não mexer) foi restaurado, agora com o raciocínio das consequências documentado no código. | `config_flow.py` |
 | §4 | B1 (documentado por que o flag de idempotência não é consultado), B2/B3 (imports e reexport mortos), B4 (`allDaysLabel`/`isAllDays` removidos), B5 (JSDoc órfão realocado), B6 (`typeof === "number"` nos dois reservatórios), B7 (`_callServiceNotifying` → toast `hass-notification` em vez de rejeição não tratada), B8 (inicializadores mortos), B10 (dia não-hasheável ignorado). **B9 era achado incorreto** — ver a tabela da §4. | vários |
 | Extra | E402 (`_LOGGER` entre imports) corrigido; imports ordenados; ruleset do Ruff ampliado para `E,F,B,SIM,RUF,I,BLE` (ignorando só `E501`); probe morto do `smoke.mjs` (`"Próximo"` → `"Próxima"`) corrigido. | `pyproject.toml`, `store.py`, `__init__.py`, `smoke.mjs` |
 
@@ -383,25 +393,29 @@ Todos os achados foram corrigidos, na ordem sugerida acima. Resumo do que mudou:
 | `tests/test_services_yaml.py` (novo, 3 testes) | A1: valida o YAML contra o schema do HA, confere que todo serviço registrado está descrito e que `set_zone_options` documenta exatamente os campos que aceita. Fora de `tests/integration` de propósito: não precisa da fixture `hass`. |
 | `tests/integration/test_frontend.py` (+2) | A2: registrar → descarregar a última → registrar de novo; e o caminho real do usuário (`async_reload` da única zona). |
 | `tests/integration/test_shutdown_watchdog.py` (novo, 4 testes) | A3: retry fecha o alvo na mesma sessão; o listener liquida o registro quando o alvo reporta desligado; o watchdog desiste após o último passo mantendo o registro; uma rega nova liquida a contabilidade pendente em vez de sobrescrevê-la. |
-| `tests/integration/test_config_flow.py` (+2) | M2: limpar um sensor de pH realmente limpa; um campo devolvido intocado é preservado. |
+| `tests/integration/test_config_flow.py` (+1) | Um sensor devolvido no payload é preservado — companheiro do `test_options_flow_preserves_ph_ec_when_keys_omitted` já existente, que cobre a chave ausente. (O teste de "limpar" que eu tinha adicionado foi removido junto com a reversão do M2.) |
 | `frontend-src/tests/card.test.ts` (+5) | B6 (registro legado sem `ph_value` não renderiza "?") e B7 (falha em ação direta vira `hass-notification`, com mensagem do backend ou fallback genérico). |
 
 ### Verificação executada
 
+Rodada primeiro localmente e depois **no CI (Linux)**, que é onde a suíte de integração
+finalmente pôde rodar — e onde o M2 foi desmascarado.
+
 | Suíte | Resultado |
 |---|---|
-| Frontend (vitest) | **176 passed** (eram 173; −2 testes de código morto removido, +5 novos) |
-| TypeScript | typecheck OK |
-| Build + smoke | OK / SMOKE OK (bundle reconstruído) |
-| Backend executável neste Windows | **39 passed** (`test_services_yaml` + `test_next_run` + `test_schedules`) |
-| Ruff (ruleset novo) | All checks passed |
-| `compileall` | OK |
+| Backend completo (CI) | **186 passed, 1 failed** → após reverter o M2: espera-se 186 passed (o teste removido era meu) |
+| Frontend (CI) | **176 passed** |
+| TypeScript / build / smoke | OK |
+| Ruff (ruleset novo, CI) | All checks passed |
+| Backend executável no Windows | **39 passed** (`test_services_yaml` + `test_next_run` + `test_schedules`) |
 | `services.yaml` vs `_SERVICES_SCHEMA` do HA 2026.2.3 | **VALID** |
 
-**Ressalva honesta:** a suíte de integração (`tests/integration/`, incluindo os 8 testes novos de A2/A3/M2)
-**não pôde ser executada aqui** — o HA 2026.2.3 importa `fcntl` e o plugin do
-`pytest-homeassistant-custom-component` carrega automaticamente, então nenhum `pytest` roda com ele
-neste Windows (ver §5). Esses testes foram escritos seguindo de perto o estilo e os helpers dos
-testes existentes, mas **precisam de uma execução no CI (Linux) para valerem como verificados**.
-Tudo o mais na tabela acima foi executado de fato.
+**Os testes novos de A1, A2 e A3 passaram todos no CI na primeira tentativa** — incluindo
+os quatro do watchdog de desligamento, que era a mudança mais delicada. A única falha do
+run foi `test_options_flow_preserves_ph_ec_when_keys_omitted`, o teste pré-existente que
+contradizia o M2; ele estava certo, e o M2 foi revertido (§3).
 
+**Lição registrada:** o achado M2 foi escrito sem procurar por um teste que já fixasse
+aquele comportamento. O nome do teste (`..._preserves_ph_ec_when_keys_omitted`) descreve
+exatamente a decisão que eu propus inverter. Uma busca por testes tocando o campo antes de
+classificar o comportamento como defeito teria evitado o falso positivo.

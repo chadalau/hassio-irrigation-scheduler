@@ -343,32 +343,52 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
                     CONF_RESERVOIR_VOLUME_L: int(
                         user_input[CONF_RESERVOIR_VOLUME_L]
                     ),
-                    # An ABSENT key means the user CLEARED that field, so it
-                    # clears the stored entity id (an empty string is the
-                    # meaningful "no sensor / gate disabled" value, same
-                    # convention as the set_zone_options service).
+                    # ``.get(key, current)`` (NOT ``or DEFAULT``, and NOT
+                    # ``.get(key, "")``): an ABSENT key preserves whatever is
+                    # already configured.
                     #
-                    # This is safe precisely because each of these fields is
-                    # rendered with ``description={"suggested_value": ...}``
-                    # below: an untouched field comes back carrying the
-                    # currently configured entity id, so "absent" can only
-                    # mean the user emptied it. Defaulting to the stored value
-                    # instead made the two cases indistinguishable and left
-                    # the options UI unable to ever remove a pH/EC sensor --
-                    # the old value simply reappeared on every save.
+                    # An absent key is genuinely AMBIGUOUS -- the frontend
+                    # omits an entity field both when the user cleared it and
+                    # (depending on how the form was rendered/submitted) when
+                    # it was never touched. The two readings were weighed
+                    # against each other and this one wins on consequences,
+                    # not on elegance:
                     #
-                    # ``vol.Optional(key, default="")`` is NOT an option here:
-                    # EntitySelector rejects "" ("Entity  is neither a valid
-                    # entity ID nor a valid UUID"), so the key really has to
-                    # be absent and be interpreted here.
-                    CONF_PH_ENTITY_ID: user_input.get(CONF_PH_ENTITY_ID, ""),
+                    # - treating absent as "cleared" makes the options UI able
+                    #   to remove a sensor, but every save that does not echo
+                    #   the field back silently DISABLES the pH gate, and a
+                    #   zone then waters without ever checking pH. That is a
+                    #   safety-relevant regression nobody would notice until
+                    #   the warning badge stopped appearing;
+                    # - treating absent as "unchanged" costs the ability to
+                    #   clear a sensor FROM THIS FORM ONLY. The card's own
+                    #   settings dialog already clears it, by sending
+                    #   ``ph_entity_id=""`` explicitly through
+                    #   ``set_zone_options`` -- an empty string there is an
+                    #   unambiguous "disable the gate".
+                    #
+                    # Pinned by test_options_flow_preserves_ph_ec_when_keys_omitted
+                    # (finding A1 of the 2026-08-12 review round). A form-level
+                    # fix would need an explicit "remove sensor" checkbox, so
+                    # that clearing is stated rather than inferred from an
+                    # absent key; ``vol.Optional(key, default="")`` cannot
+                    # express it either, since EntitySelector rejects "".
+                    CONF_PH_ENTITY_ID: user_input.get(
+                        CONF_PH_ENTITY_ID, current_ph_entity
+                    ),
                     CONF_PH_MIN: ph_min,
                     CONF_PH_MAX: ph_max,
-                    CONF_EC_ENTITY_ID: user_input.get(CONF_EC_ENTITY_ID, ""),
-                    CONF_PH_ENTITY_ID_2: user_input.get(CONF_PH_ENTITY_ID_2, ""),
+                    CONF_EC_ENTITY_ID: user_input.get(
+                        CONF_EC_ENTITY_ID, current_ec_entity
+                    ),
+                    CONF_PH_ENTITY_ID_2: user_input.get(
+                        CONF_PH_ENTITY_ID_2, current_ph_entity_2
+                    ),
                     CONF_PH_MIN_2: ph_min_2,
                     CONF_PH_MAX_2: ph_max_2,
-                    CONF_EC_ENTITY_ID_2: user_input.get(CONF_EC_ENTITY_ID_2, ""),
+                    CONF_EC_ENTITY_ID_2: user_input.get(
+                        CONF_EC_ENTITY_ID_2, current_ec_entity_2
+                    ),
                 }
                 # Saving options MUST NOT reload the entry (the update listener
                 # only recalculates the next firing).

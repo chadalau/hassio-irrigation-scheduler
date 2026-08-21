@@ -118,16 +118,19 @@ Edita duracao padrao, duracao maxima, vazao por vaso, numero de vasos, volume
 do reservatorio, o gate de pH e o sensor de EC sem interromper uma rega em
 andamento. Rejeita `default_duration > max_duration` e `ph_min > ph_max`.
 `ph_entity_id`/`ec_entity_id` (e as versoes R2) usam
-`user_input.get(chave, "")`: uma chave AUSENTE significa que o usuario LIMPOU
-o campo, e limpa o sensor guardado (string vazia = "sem sensor / gate
-desligado", mesma convencao do servico `set_zone_options`). Isso so e seguro
-porque cada um desses campos e renderizado com
-`description={"suggested_value": ...}`, entao um campo NAO tocado volta
-carregando o entity id configurado -- "ausente" so pode significar que o
-usuario o esvaziou. Cair no valor guardado (comportamento anterior) tornava os
-dois casos indistinguiveis e deixava a UI de opcoes incapaz de remover um
-sensor de pH/EC: o valor antigo reaparecia a cada save. `vol.Optional(chave,
-default="")` nao resolve: o `EntitySelector` rejeita `""`.
+`user_input.get(chave, valor_atual)`: uma chave AUSENTE preserva o que ja esta
+configurado. A ausencia e genuinamente AMBIGUA (o frontend omite o campo tanto
+quando o usuario o limpou quanto quando ele nao foi tocado), e a escolha e pela
+assimetria das consequencias: ler ausencia como "limpar" desativaria
+silenciosamente o gate de pH num save qualquer -- a zona passaria a regar sem
+checar pH, sem ninguem perceber -- enquanto ler como "nao mexer" custa apenas
+nao poder limpar o sensor POR ESTE formulario; o dialogo de configuracoes do
+card ja limpa, mandando `ph_entity_id=""` explicitamente via
+`set_zone_options`. Travado por
+`test_options_flow_preserves_ph_ec_when_keys_omitted` (achado A1 da rodada de
+2026-08-12). Limpar pelo options flow exigiria um checkbox explicito ("remover
+sensor"), para a limpeza ser declarada em vez de inferida;
+`vol.Optional(chave, default="")` nao serve, o `EntitySelector` rejeita `""`.
 
 ### `scheduler.py`
 
