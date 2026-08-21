@@ -133,6 +133,14 @@ Tres camadas de correcao, nao uma:
    esse mesmo uid (`_async_watchdog_owns_record`). Um registro que mudou de dono, ou que ja
    foi liquidado, faz o watchdog se desarmar sem tocar em nada.
 
+As tres camadas nao sao redundantes, e um teste que falhou no CI deixou isso explicito. No
+cenario mais comum do A1 -- unload com desligamento nao confirmado seguido de reload -- a
+instancia nova **retoma a mesma rega** (o registro continua no Store com `finishes_at` no
+futuro). Um watchdog orfao da instancia velha carregaria o MESMO `run_uid` do registro
+retomado, entao a camada 3 sozinha o deixaria agir. Quem protege esse caso e a camada 1
+(`_unloaded`) somada a 2 (`finally`). A camada 3 cobre o caso complementar: o registro trocar
+de dono para uma rega diferente.
+
 **M2 confirmado e corrigido.** `_async_store_mark_actuated()` agora recebe o `run_uid`
 capturado no ponto em que a atuacao foi observada, e o mutator vira no-op quando o registro
 atual carrega outro uid -- a mesma disciplina que `_async_store_mark_history_logged()` ja
@@ -159,7 +167,7 @@ que ja estava em producao via HACS.
 | Teste | Cobre |
 |---|---|
 | `test_unload_never_leaves_a_watchdog_behind` | A1: nenhum timer sobrevive ao unload com desligamento nao confirmado |
-| `test_reload_survives_an_orphaned_watchdog_window` | A1 ponta a ponta: unload -> reload -> nova rega -> avanco por todo o backoff |
+| `test_reload_leaves_no_orphan_able_to_touch_the_resumed_run` | A1 ponta a ponta: unload -> reload -> a instancia velha nao tem nada que possa disparar, e disparar a mao e inerte |
 | `test_watchdog_stands_down_when_the_record_changed_hands` | A1: ownership por `run_uid` isolado |
 | `test_mark_actuated_never_stamps_another_runs_record` | M2 |
 | `restarts the countdown when the same element is reattached` | B1 |

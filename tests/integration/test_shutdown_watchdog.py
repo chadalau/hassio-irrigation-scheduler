@@ -305,12 +305,26 @@ async def test_unload_never_leaves_a_watchdog_behind(
     assert not old_scheduler._watchdog_active
 
 
-async def test_reload_survives_an_orphaned_watchdog_window(
+async def test_reload_leaves_no_orphan_able_to_touch_the_resumed_run(
     hass: HomeAssistant, hass_storage
 ) -> None:
-    """The same regression end to end: unload with an unconfirmed shutdown,
-    reload, start a new run, then advance past every backoff step. The new
-    run must still be watering and still own its Store record."""
+    """The A1 scenario end to end, and the reason it needs THREE layers.
+
+    Unload with an unconfirmed shutdown, then reload. The reloaded instance
+    RESUMES the very same run (its record is still in the Store with a future
+    finishes_at), which is the subtle part: an orphaned watchdog from the old
+    scheduler would carry the SAME run_uid as the resumed record, so the
+    ownership check alone would happily let it act. What actually protects
+    this case is the old scheduler never arming a callback at all -- the
+    ``_unloaded`` flag plus the ``finally`` clear in async_unload.
+
+    (An earlier version of this test asserted "no turn_off happens while time
+    advances". That was wrong twice over: water_now is a no-op while the
+    resumed run is watering, and advancing past the backoff steps crosses that
+    run's own finishes_at, so its stop timer fires a perfectly legitimate
+    turn_off. Counting service calls cannot tell an orphan apart from the
+    real owner; asserting on the orphan's own state can.)
+    """
     off_calls: list[str] = []
 
     @callback
@@ -331,37 +345,36 @@ async def test_reload_survives_an_orphaned_watchdog_window(
         DOMAIN, SERVICE_WATER_NOW, {"entity_id": sensor_eid}, blocking=True
     )
     await hass.async_block_till_done()
+    old_scheduler = scheduler_of(entry)
+    original_run_uid = old_scheduler._active_run_uid
+    assert original_run_uid is not None
 
+    # Unload while watering: every turn_off attempt goes unconfirmed.
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    # A brand-new run on the reloaded instance.
-    sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
-    assert sensor_eid
-    await hass.services.async_call(
-        DOMAIN, SERVICE_WATER_NOW, {"entity_id": sensor_eid}, blocking=True
-    )
-    await hass.async_block_till_done()
     new_scheduler = scheduler_of(entry)
+    assert new_scheduler is not old_scheduler
+    # The reloaded instance owns the run now -- the same one, resumed.
     assert new_scheduler.is_watering
-    new_run_uid = new_scheduler._active_run_uid
+    data = await hass.data[DOMAIN]["store"].async_load()
+    assert data["entries"][entry.entry_id]["run_uid"] == original_run_uid
 
+    # The discarded scheduler holds nothing that can ever fire...
+    assert old_scheduler._unsub_watchdog is None
+    assert not old_scheduler._watchdog_active
+
+    # ...and firing its callback by hand is inert, so even a timer that
+    # somehow escaped could not close the run the new instance is watering.
     off_calls.clear()
-    for delay in SHUTDOWN_WATCHDOG_DELAYS:
-        async_fire_time_changed_exact(
-            hass, dt_util.utcnow() + timedelta(seconds=delay + 1)
-        )
-        await hass.async_block_till_done()
-
-    # No stale callback closed the new run, and its record is intact.
+    await old_scheduler._async_watchdog_fired()
+    await hass.async_block_till_done()
     assert off_calls == []
     assert new_scheduler.is_watering
     data = await hass.data[DOMAIN]["store"].async_load()
-    assert data["entries"][entry.entry_id]["run_uid"] == new_run_uid
-    # Nor was the new run logged as finished by somebody else.
-    assert new_scheduler.history == []
+    assert data["entries"][entry.entry_id]["run_uid"] == original_run_uid
 
 
 async def test_watchdog_stands_down_when_the_record_changed_hands(
