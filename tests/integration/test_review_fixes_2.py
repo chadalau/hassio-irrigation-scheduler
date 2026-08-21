@@ -12,7 +12,6 @@ from unittest.mock import patch
 from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.util import dt as dt_util
-
 from pytest_homeassistant_custom_component.common import async_fire_time_changed_exact
 
 from custom_components.irrigation_scheduler.const import (
@@ -111,7 +110,7 @@ async def test_resumed_run_that_finishes_normally_logs_restored_ph_ec(
 
     scheduler = scheduler_of(entry)
     assert scheduler.is_watering
-    assert scheduler._active_ph_value == 6.1  # noqa: SLF001
+    assert scheduler._active_ph_value == 6.1
 
     async_fire_time_changed_exact(
         hass, scheduler.finishes_at + timedelta(seconds=1)
@@ -185,7 +184,7 @@ async def test_start_run_reverts_state_when_store_save_fails(
 
     assert not scheduler.is_watering
     assert scheduler.started_at is None
-    assert scheduler._unsub_stop is None  # noqa: SLF001
+    assert scheduler._unsub_stop is None
 
     # And the zone is NOT stuck: a later water_now (store working again)
     # succeeds normally.
@@ -212,7 +211,7 @@ async def test_set_zone_options_clears_stale_warnings_when_ph_gate_disabled(
     entry = await setup_zone(target_entity_id="switch.zone1", name="Garden")
     sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
     scheduler = scheduler_of(entry)
-    scheduler._schedule_warnings["some-id"] = "pH fora do intervalo"  # noqa: SLF001
+    scheduler._schedule_warnings["some-id"] = "pH fora do intervalo"
 
     await hass.services.async_call(
         DOMAIN,

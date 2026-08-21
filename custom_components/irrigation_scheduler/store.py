@@ -42,9 +42,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-_LOGGER = logging.getLogger(__name__)
-
 from .const import STORE_KEY, STORE_VERSION
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _prune_history(

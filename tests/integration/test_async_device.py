@@ -26,7 +26,6 @@ from datetime import timedelta
 from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
-
 from pytest_homeassistant_custom_component.common import async_fire_time_changed_exact
 
 from custom_components.irrigation_scheduler.const import (
@@ -240,8 +239,8 @@ async def test_never_actuating_target_ends_run_after_grace(
 
     # No timer left behind: firing at the old finishes_at must do nothing.
     assert scheduler.finishes_at is None
-    assert scheduler._unsub_stop is None  # noqa: SLF001
-    assert scheduler._unsub_actuation is None  # noqa: SLF001
+    assert scheduler._unsub_stop is None
+    assert scheduler._unsub_actuation is None
     async_fire_time_changed_exact(hass, old_finishes_at + timedelta(seconds=1))
     await hass.async_block_till_done()
     assert len(async_device.turn_off_calls) == 1  # no extra turn_off
@@ -276,8 +275,8 @@ async def test_stop_timer_armed_before_deferred_actuation_check(
     assert len(async_device.turn_on_calls) == 1
     # Safety net: the stop timer is armed immediately, BEFORE the deferred
     # actuation check fires.
-    assert scheduler._unsub_stop is not None  # noqa: SLF001
-    assert scheduler._unsub_actuation is not None  # noqa: SLF001
+    assert scheduler._unsub_stop is not None
+    assert scheduler._unsub_actuation is not None
     assert scheduler.finishes_at is not None
 
     # Even though the target has not actuated yet, the stop timer ends the run
@@ -362,8 +361,8 @@ async def test_stale_off_echo_ignored_during_actuation_window(
     await hass.async_block_till_done()
     assert scheduler.is_watering
     assert scheduler.finishes_at == run_b_finishes
-    assert scheduler._unsub_stop is not None  # noqa: SLF001
-    assert scheduler._unsub_actuation is not None  # noqa: SLF001
+    assert scheduler._unsub_stop is not None
+    assert scheduler._unsub_actuation is not None
 
     # -- finishes_at: the run ends and the target is off --
     async_fire_time_changed_exact(hass, run_b_finishes + timedelta(seconds=1))

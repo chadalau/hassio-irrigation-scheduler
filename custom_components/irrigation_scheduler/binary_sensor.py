@@ -31,6 +31,18 @@ async def async_setup_entry(
 class IrrigationSchedulerBinarySensor(BinarySensorEntity):
     """Binary sensor indicating that watering is in progress."""
 
+    # ``history`` (up to HISTORY_MAX_ENTRIES records of ~14 fields each) and
+    # the ``last_run`` copy of its first item are a UI payload for the card,
+    # not something worth persisting on EVERY state write. Recorder caps a
+    # state's serialized attributes at MAX_STATE_ATTRS_BYTES (16 KiB) and
+    # DROPS ALL of them past it -- measured at ~377 bytes/record, a zone
+    # watering more than ~44 times in the 30-day retention window would
+    # silently lose every attribute of this entity (including started_at/
+    # finishes_at/source) and log a performance warning on each write.
+    # Excluding them here keeps the recorded attributes small and stable;
+    # the live state machine still carries the full payload for the card.
+    _unrecorded_attributes = frozenset({"history", "last_run"})
+
     _attr_has_entity_name = True
     _attr_translation_key = "watering"
     _attr_device_class = BinarySensorDeviceClass.RUNNING

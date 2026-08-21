@@ -1067,6 +1067,128 @@ describe("IrrigationScheduleCard last run + history dialog", () => {
   });
 });
 
+describe("IrrigationScheduleCard history entry readings", () => {
+  function renderEntry(entry: HistoryRun): string {
+    const card = makeCard();
+    card.hass = makeHass({}, []);
+    const template = (
+      card as unknown as {
+        _renderHistoryEntry: (value: HistoryRun) => unknown;
+      }
+    )._renderHistoryEntry(entry);
+    const container = document.createElement("div");
+    render(template as Parameters<typeof render>[0], container);
+    return container.textContent ?? "";
+  }
+
+  it("renders pH/EC readings when they were captured", () => {
+    const text = renderEntry(
+      historyRun({ ph_value: 6.12, ec_value: 812.5, ec_unit: "µS/cm" }),
+    );
+    expect(text).toContain("6.12 PH");
+    expect(text).toContain("EC 812.5 µS/cm");
+  });
+
+  it("omits readings that are null", () => {
+    const text = renderEntry(historyRun());
+    expect(text).not.toContain("PH");
+    expect(text).not.toContain("EC");
+  });
+
+  it("omits readings that are MISSING, not just null", () => {
+    // REGRESSION: R1 tested `!== null`, so a record written before the pH/EC
+    // fields existed (key absent -> undefined) slipped through and rendered
+    // the "unknown reading" placeholder as if a real value had been
+    // captured. R2 already used a typeof check; both do now.
+    const legacy = historyRun();
+    delete (legacy as Partial<HistoryRun>).ph_value;
+    delete (legacy as Partial<HistoryRun>).ec_value;
+    const text = renderEntry(legacy as HistoryRun);
+    expect(text).not.toContain("?");
+    expect(text).not.toContain("PH");
+  });
+});
+
+describe("IrrigationScheduleCard direct action failures", () => {
+  /** A hass whose callService always rejects. */
+  function makeFailingHass(
+    states: Record<string, HassEntity>,
+    message: string,
+  ): HomeAssistant {
+    return {
+      language: "pt-BR",
+      locale: { language: "pt-BR" },
+      states,
+      callService: async () => {
+        throw new Error(message);
+      },
+    };
+  }
+
+  it("reports a failed water_now as a hass-notification instead of an unhandled rejection", async () => {
+    // REGRESSION: _callService logs and RE-THROWS (so the dialogs can render
+    // the message inline); the direct actions ignored the returned promise,
+    // producing "Uncaught (in promise)" and zero feedback for the user.
+    const card = makeCard();
+    card.hass = makeFailingHass(
+      { "sensor.jardim_next_run": baseSensor() },
+      "zone is busy",
+    );
+    card.setConfig({ ...VALID_CONFIG });
+    document.body.appendChild(card);
+    attachedCards.push(card);
+    await card.updateComplete;
+
+    const notifications: string[] = [];
+    card.addEventListener("hass-notification", (ev) => {
+      notifications.push(
+        ((ev as CustomEvent).detail as { message: string }).message,
+      );
+    });
+
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      (card as unknown as { _waterNow: () => void })._waterNow();
+      // Let the rejection settle.
+      await Promise.resolve();
+      await Promise.resolve();
+    } finally {
+      consoleError.mockRestore();
+    }
+
+    expect(notifications).toEqual(["zone is busy"]);
+  });
+
+  it("falls back to a generic message when the error carries none", async () => {
+    const card = makeCard();
+    card.hass = makeFailingHass({ "sensor.jardim_next_run": baseSensor() }, "");
+    card.setConfig({ ...VALID_CONFIG });
+    document.body.appendChild(card);
+    attachedCards.push(card);
+    await card.updateComplete;
+
+    const notifications: string[] = [];
+    card.addEventListener("hass-notification", (ev) => {
+      notifications.push(
+        ((ev as CustomEvent).detail as { message: string }).message,
+      );
+    });
+
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      (card as unknown as { _stopWatering: () => void })._stopWatering();
+      await Promise.resolve();
+      await Promise.resolve();
+    } finally {
+      consoleError.mockRestore();
+    }
+
+    expect(notifications).toEqual([
+      "Não foi possível salvar: o backend rejeitou os dados enviados.",
+    ]);
+  });
+});
+
 describe("IrrigationScheduleCard schedule status icons (done/pending/warning)", () => {
   beforeEach(() => {
     // 2026-08-13T09:00:00Z is a Thursday -- baseSensor's s1 (06:00, every

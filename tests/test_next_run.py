@@ -14,10 +14,11 @@ Coverage:
 
 from __future__ import annotations
 
-from datetime import datetime, time as dt_time, timezone
+from datetime import datetime, timezone
+from datetime import time as dt_time
+from zoneinfo import ZoneInfo
 
 import pytest
-from zoneinfo import ZoneInfo
 
 from .pure_loader import load_pure_module
 
@@ -216,7 +217,7 @@ def _ny_tz() -> ZoneInfo:
     """Return the America/New_York zone, skipping if tzdata is unavailable."""
     try:
         return ZoneInfo("America/New_York")
-    except Exception as exc:  # noqa: BLE001 - ZoneInfoNotFoundError on some OS
+    except Exception as exc:  # noqa: BLE001 - any tzdata failure means "skip"
         pytest.skip(f"IANA timezone database not available on this platform: {exc}")
 
 

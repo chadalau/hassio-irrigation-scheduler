@@ -54,11 +54,6 @@ export function dayLabels(): string[] {
   return [...DAYS_PT];
 }
 
-/** Label shown when every day of the week is selected. */
-export function allDaysLabel(): string {
-  return "Todos os dias";
-}
-
 /**
  * Single-letter day initials, same order/index as ``dayLabels()`` (index 0 =
  * Monday). Deliberately ambiguous on its own (Seg/Sex/Sáb all start with
@@ -67,11 +62,6 @@ export function allDaysLabel(): string {
  */
 export function dayInitials(): string[] {
   return dayLabels().map((label) => label.charAt(0));
-}
-
-/** True when ``days`` covers Monday..Sunday (all week). */
-export function isAllDays(days: readonly number[]): boolean {
-  return days.length === 7 && days.every((d) => d >= 0 && d <= 6);
 }
 
 /** "15 min" / "1 h 30 min" / "45 s". */

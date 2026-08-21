@@ -227,12 +227,12 @@ set_zone_options:
           min: 0
           max: 14
           step: 0.1
+          mode: box
     ec_entity_id:
       name: EC sensor
       description: Entity id of an EC (conductivity) sensor. Display-only -- it never gates a run, it only feeds the card's EC badge. Send an empty string to clear it.
       selector:
         text:
-          mode: box
     ph_entity_id_2:
       name: R2 pH sensor
       description: Entity id of a pH sensor for a SECOND, independent reservoir (e.g. one pump/outlet feeding two tanks). When set, SCHEDULED runs only start while BOTH reservoirs read within their own range. Send an empty string to disable.
@@ -255,9 +255,9 @@ set_zone_options:
           min: 0
           max: 14
           step: 0.1
+          mode: box
     ec_entity_id_2:
       name: R2 EC sensor
       description: Entity id of an EC sensor for the second reservoir. Display-only. Send an empty string to clear it.
       selector:
         text:
-          mode: box

@@ -40,7 +40,17 @@ o proximo disparo, preservando uma rega ativa.
 #### `_async_register_frontend(hass)`
 
 Registra `irrigation-schedule-card.js` como caminho estatico e adiciona
-`/irrigation_scheduler/card.js` aos modulos extras do Lovelace.
+`/irrigation_scheduler/card.js` aos modulos extras do Lovelace. Chamado no
+setup do componente E em CADA `async_setup_entry`, porque as duas metades sao
+idempotentes de formas diferentes: o caminho estatico so pode ser registrado
+UMA vez por processo (o aiohttp lanca `RuntimeError: Added route will never be
+executed, method GET is already registered` na segunda vez), entao e protegido
+pela flag `DATA_CARD_PATH_REGISTERED` em `hass.data[DOMAIN]`; ja a URL de
+modulo extra PRECISA ser readicionada por entrada, porque
+`_async_unregister_frontend` a remove quando a ultima entrada e descarregada
+e o setup do componente nao roda de novo depois (recarregar a unica zona,
+atualizar via HACS, remover e readicionar). Sem isso o card parava de carregar
+em abas novas ("Custom element doesn't exist") ate reiniciar o HA.
 
 #### `_async_unregister_frontend(hass)`
 
@@ -107,11 +117,17 @@ Abre o fluxo para editar as opcoes de uma zona existente.
 Edita duracao padrao, duracao maxima, vazao por vaso, numero de vasos, volume
 do reservatorio, o gate de pH e o sensor de EC sem interromper uma rega em
 andamento. Rejeita `default_duration > max_duration` e `ph_min > ph_max`.
-`ph_entity_id`/`ec_entity_id` usam `user_input.get(chave, valor_atual)` (nao
-`or DEFAULT`): a chave fica ausente em `user_input` quando o campo nao foi
-tocado, e nesse caso o valor ja configurado deve ser preservado -- `or
-DEFAULT` apagaria silenciosamente o gate de pH/EC toda vez que o formulario
-fosse salvo sem tocar nesses campos.
+`ph_entity_id`/`ec_entity_id` (e as versoes R2) usam
+`user_input.get(chave, "")`: uma chave AUSENTE significa que o usuario LIMPOU
+o campo, e limpa o sensor guardado (string vazia = "sem sensor / gate
+desligado", mesma convencao do servico `set_zone_options`). Isso so e seguro
+porque cada um desses campos e renderizado com
+`description={"suggested_value": ...}`, entao um campo NAO tocado volta
+carregando o entity id configurado -- "ausente" so pode significar que o
+usuario o esvaziou. Cair no valor guardado (comportamento anterior) tornava os
+dois casos indistinguiveis e deixava a UI de opcoes incapaz de remover um
+sensor de pH/EC: o valor antigo reaparecia a cada save. `vol.Optional(chave,
+default="")` nao resolve: o `EntitySelector` rejeita `""`.
 
 ### `scheduler.py`
 
@@ -438,10 +454,60 @@ deducao do reservatorio funcionam identicos a qualquer outra rega.
 
 Cancela o timer anterior e agenda um unico proximo disparo.
 
-#### `_cancel_next()`, `_cancel_stop()`, `_cancel_actuation()`
+#### `_cancel_next()`, `_cancel_stop()`, `_cancel_actuation()`, `_cancel_watchdog()`
 
-Cancelam, respectivamente, o timer do proximo horario, o timer de desligamento
-e o timer de verificacao de atuacao.
+Cancelam, respectivamente, o timer do proximo horario, o timer de desligamento,
+o timer de verificacao de atuacao e o timer do watchdog de desligamento.
+
+### Watchdog de desligamento (alvo possivelmente aberto)
+
+#### `_async_arm_shutdown_watchdog()`
+
+Arma (ou continua) o retry NA SESSAO ATUAL de um desligamento defensivo que nao
+pode ser CONFIRMADO. Chamado por todo caminho que preserva o registro do Store
+por esse motivo: o ramo de downtime de `_async_recover_state`, o laco de retry
+de `turn_off` em `_async_finish_run` e `_async_abort_run`. Preservar o registro
+resolve a metade DURAVEL do problema (o proximo boot tenta de novo); sozinha,
+ela deixava uma valvula possivelmente aberta sem timer, sem retry e com o
+listener de estado se recusando a agir -- o alvo ainda ligado parecia uma
+ativacao externa nova, que `async_create_entry` corretamente rejeita, e o ramo
+de reversao cancelava o proprio timer que acabara de armar. O backoff
+(`SHUTDOWN_WATCHDOG_DELAYS = (5, 15, 30, 60, 120, 300, 600)`) comeca curto
+porque a causa mais comum e um dispositivo ainda `unavailable` poucos segundos
+apos o boot.
+
+#### `_async_watchdog_fired()` / `_async_attempt_pending_shutdown()`
+
+Um passo do backoff: se ja ha uma rega ativa (ela e dona do alvo e tem o
+proprio timer) o watchdog se desarma; esgotados os passos, loga erro e desiste,
+mantendo o registro pro proximo boot. Caso contrario tenta um `turn_off` e,
+se o alvo for confirmado desligado, liquida o registro
+(`_async_resolve_pending_record`) e se desarma.
+
+#### `_async_watchdog_state_changed()`
+
+Chamado pelo listener quando o alvo muda de estado com um registro pendente. Só
+age num desligamento CONFIRMADO (liquida o registro sem esperar o proximo passo
+do backoff); um `on` e deixado pro timer de proposito -- retentar direto do
+listener entraria em laco apertado contra o eco do nosso proprio `turn_off` num
+dispositivo que nunca fecha de verdade.
+
+#### `_async_resolve_pending_record()`
+
+Loga (se devido) e remove o registro preservado. Le o registro do Store, nao um
+snapshot, pra sempre enxergar os marcadores `actuated`/`history_logged` atuais:
+`_async_finish_run` marca como ja logado o registro que sobrevive, enquanto um
+registro preservado pela recuperacao ainda nao foi logado. Tambem e chamado por
+`_async_start_run` ANTES do `async_save_entry` que sobrescreveria o registro --
+sem isso, uma rega iniciada com um registro pendente destruia silenciosamente o
+`run_uid`, o historico e a deducao da rega anterior (e com eles o registro que
+"o proximo boot" deveria reprocessar).
+
+#### `_async_log_recovered_run(run_state)`
+
+Anexa ao historico uma rega vinda do Store (nao da memoria), reconstruindo
+duracao/inicio do payload persistido e normalizando datetimes naive. Extraido
+de `_async_recover_state` para ser reusado pelo watchdog.
 
 #### `_async_recover_state()`
 
@@ -473,7 +539,10 @@ nenhuma evidencia; sem `history_logged`, um registro que sobreviveu porque o
 desligamento nao foi confirmado (mas que `_async_finish_run` JA logou
 naquele momento) seria logado DE NOVO aqui, duplicando a rega no historico e
 a deducao do reservatorio para uma unica rega fisica -- reproduzido
-empiricamente antes do fix. `started_at`/`recovered_started_at` naive (sem
+empiricamente antes do fix. Quando o desligamento defensivo NAO pode ser
+confirmado, alem de preservar o registro (retorna `True`, e `async_setup` pula
+a reconciliacao externa) tambem arma o watchdog de desligamento, que segue
+tentando durante esta sessao em vez de esperar o proximo boot. `started_at`/`recovered_started_at` naive (sem
 timezone) sao normalizados com `dt_util.as_utc()` logo apos o parse em AMBOS
 os ramos (retomada e expirado durante downtime) -- normalizar so
 `finishes_at` (fix anterior) nao bastava: `_coerce_stored_duration`/
@@ -676,6 +745,14 @@ entidades irmas, vazao por vaso, vasos, volume do reservatorio
 Cria o binary sensor `watering`, com estado e dados da rega atual, alem de
 `last_run` (rega mais recente concluida) e `history` (log de 30 dias).
 
+`history`/`last_run` estao em `_unrecorded_attributes`: o recorder limita os
+atributos serializados de um estado a `MAX_STATE_ATTRS_BYTES` (16 KiB) e
+DESCARTA TODOS eles acima disso. Com ~377 bytes por registro, uma zona que
+rega mais de ~44 vezes na janela de 30 dias perderia silenciosamente todos os
+atributos desta entidade no banco (inclusive `started_at`/`finishes_at`/
+`source`), alem de logar um aviso de performance a cada escrita. A maquina de
+estados em memoria continua carregando o payload completo para o card.
+
 ## Servicos
 
 Todos aceitam alvo por entidade, dispositivo ou area.
@@ -717,8 +794,6 @@ Arquivo fonte: `frontend-src/src/card.ts`.
 | `formatTime` | Exibe horario sem segundos quando eles sao zero. |
 | `dayLabels` | Retorna as abreviacoes dos dias, sempre em pt-BR (o card e Portuguese-only por design). |
 | `dayInitials` | Retorna uma letra por dia (S T Q Q S S D), mesma ordem de `dayLabels`. Ambiguo de proposito -- a posicao fixa no indicador e que informa qual dia e, nao a letra isolada. |
-| `allDaysLabel` | Retorna `Todos os dias`. |
-| `isAllDays` | Detecta se os sete dias estao selecionados. |
 | `formatDuration` | Formata segundos em segundos, minutos e horas. |
 | `remainingSeconds` | Calcula segundos restantes ate `finishes_at`. |
 | `formatRemaining` | Exibe contagem no formato `MM:SS` ou `H:MM:SS`. |
@@ -777,8 +852,8 @@ Convencoes de acessibilidade dos controles proprios (nao-HA) do card:
 | `_renderHistoryDialog` | Renderiza o dialogo de historico: estatisticas do periodo (contagem, total) e a lista agrupada por dia via `groupHistoryByDay`. |
 | `_renderHistoryDayGroup` | Renderiza o cabecalho de um dia (label + contagem + total) e suas entradas. |
 | `_renderHistoryEntry` | Renderiza uma rega do historico: horario, fonte (via `sourceLabel`/`sourceIcon` -- agendada/manual/ativada no dispositivo), duracao, ml/vaso e pH/EC dos dois reservatorios (quando presentes; R2 sufixado " R2"). |
-| `_waterNow` | Chama `water_now`. |
-| `_stopWatering` | Chama `stop`. |
+| `_waterNow` | Chama `water_now` via `_callServiceNotifying`. |
+| `_stopWatering` | Chama `stop` via `_callServiceNotifying`. |
 | `_refillReservoir` | Confirma com o usuario (`window.confirm`) e, se aceito, chama `refill_reservoir`. |
 | `_toggleMaster` | Liga/desliga o agendamento geral. Recebe o estado ATUAL (`currentlyOn`) e inverte (`turn_off` quando ligado, `turn_on` quando desligado) -- o toggle e um `<button>` proprio (`.toggle`), nao um `ha-switch`, entao nao ha `ev.target.checked` para ler. |
 | `_toggleScheduleEnabled` | Habilita/desabilita um horario individual, invertendo `schedule.enabled` (mesma razao do `_toggleMaster`: o toggle e um `<button>` proprio). |
@@ -786,7 +861,8 @@ Convencoes de acessibilidade dos controles proprios (nao-HA) do card:
 | `_saveDialog` | Combina hh:mm:ss em segundos, valida e chama add/update schedule. So fecha o dialogo se o servico confirmar sucesso; numa falha do backend (ex. `ServiceValidationError`), mantem o dialogo aberto e mostra a mensagem de erro em vez de fechar como se tivesse salvo. |
 | `_onVolumeChange` | Converte o volume por vaso (ml) digitado de volta em hh:mm:ss usando a vazao da zona (`durationSecondsForPerPotVolumeMl`, inverso de `perPotVolumeMl`); no-op se a vazao nao estiver configurada. |
 | `_saveSettings` | Valida (inclusive `ph_min <= ph_max` e `ph_min_2 <= ph_max_2`, independentemente) e chama `set_zone_options` com duracao padrao (min -> segundos), vazao, vasos, reservatorio e pH/EC dos dois reservatorios; so envia `ph_entity_id`/`ec_entity_id` (e as versoes `_2`) quando o campo foi de fato editado (string vazia e um valor explicito que desativa/limpa, diferente de "nao alterado"); nao chama o servico se nada mudou. So fecha o painel se o servico confirmar sucesso; numa falha do backend, mantem o painel aberto e mostra a mensagem de erro. |
-| `_callService` | Chama `hass.callService` e retorna a Promise (em vez de disparar e esquecer) para que `_saveDialog`/`_saveSettings` possam reagir a falhas do backend em vez de fechar o dialogo/painel silenciosamente. |
+| `_callService` | Chama `hass.callService` e retorna a Promise (em vez de disparar e esquecer) para que `_saveDialog`/`_saveSettings` possam reagir a falhas do backend em vez de fechar o dialogo/painel silenciosamente. Loga e RELANCA o erro. |
+| `_callServiceNotifying` | Envolve `_callService` para as acoes diretas (regar, parar, refil, toggle de horario, excluir), que nao tem dialogo onde renderizar o erro: trata a rejeicao e a mostra no toast do proprio Home Assistant (evento `hass-notification`, mesmo padrao do `hass-more-info`). Sem isso a rejeicao relancada virava um "Uncaught (in promise)" sem nenhum retorno visivel pro usuario. |
 | `_openAdd` / `_openEdit` | Abrem o formulario de horario. `_openAdd` sempre comeca com todos os campos zerados (horario `00:00`, nenhum dia, duracao `00:00:00`) -- nao pre-preenche mais com `default_duration` da zona. `_openEdit` carrega os valores do horario existente. |
 | `_openSettings` / `_closeSettings` | Abrem/fecham as configuracoes do card. Fechar pelo icone de engrenagem (nao so pelo botao "Fechar") tambem reseta o formulario via `_closeSettings` -- reabrir depois nao deve mostrar valores digitados/abandonados de uma sessao anterior. |
 | `_stopTicker` | Cancela a contagem regressiva de um segundo. |

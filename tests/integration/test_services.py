@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
 from datetime import timedelta
 
+import pytest
 from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
-
 from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed_exact,
     async_mock_service,

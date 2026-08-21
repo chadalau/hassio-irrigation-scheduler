@@ -5,6 +5,7 @@ Covers serving + registering the card JS with Lovelace:
   - ``add_extra_js_url`` registered the URL in the frontend UrlManager
     (``hass.data["frontend_extra_module_url"]``);
   - the URL is removed only when the LAST entry unloads;
+  - and is registered AGAIN when a new entry is set up afterwards;
   - a missing card JS logs a warning and never breaks the backend.
 
 The card itself (Lit/TS) is Onda B2 and is not tested here beyond stable
@@ -80,6 +81,53 @@ async def test_extra_js_url_removed_only_with_last_entry(
     assert await hass.config_entries.async_unload(entry2.entry_id)
     await hass.async_block_till_done()
     assert CARD_JS_URL not in manager.urls
+
+
+async def test_extra_js_url_is_registered_again_after_the_last_unload(
+    hass: HomeAssistant, setup_zone, hass_client_no_auth
+) -> None:
+    """REGRESSION: setting an entry up again after the last one unloaded must
+    re-register the card URL.
+
+    ``async_setup`` runs ONCE per process, so it does not run again when an
+    entry is added to an already-set-up component -- exactly what happens on a
+    "Reload" of the only zone, a HACS update, or a remove + re-add. The
+    services were already re-registered per entry for this reason; the extra
+    module URL was not, so the card silently stopped loading in new browser
+    sessions ("Custom element doesn't exist") until Home Assistant restarted.
+    """
+    entry = await setup_zone(target_entity_id="switch.zone1", name="Garden")
+    manager = hass.data[DATA_EXTRA_MODULE_URL]
+    assert CARD_JS_URL in manager.urls
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert CARD_JS_URL not in manager.urls
+
+    # A brand-new zone (component already set up -> async_setup does NOT run).
+    await setup_zone(target_entity_id="switch.zone2", name="Backyard")
+    assert CARD_JS_URL in manager.urls
+
+    # The static path survived the whole cycle: it is registered once per
+    # process (re-registering the same route raises in aiohttp) and never
+    # unregistered, so the URL still serves the real file.
+    client = await hass_client_no_auth()
+    resp = await client.get(CARD_JS_URL)
+    assert resp.status == 200
+    assert "irrigation-schedule-card" in await resp.text()
+
+
+async def test_reloading_the_only_entry_keeps_the_card_registered(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """The same regression through the path users actually hit: Reload."""
+    entry = await setup_zone(target_entity_id="switch.zone1", name="Garden")
+    manager = hass.data[DATA_EXTRA_MODULE_URL]
+
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert CARD_JS_URL in manager.urls
 
 
 async def test_missing_card_js_warns_and_does_not_break_setup(

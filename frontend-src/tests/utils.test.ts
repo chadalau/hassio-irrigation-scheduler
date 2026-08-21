@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   countSchedulesToday,
-  allDaysLabel,
   averageDailyVolumeL,
   dayInitials,
   dayLabels,
@@ -17,7 +16,6 @@ import {
   dayLabelFor,
   durationSecondsForPerPotVolumeMl,
   groupHistoryByDay,
-  isAllDays,
   parseTimeParts,
   perPotVolumeMl,
   progressPct,
@@ -726,19 +724,6 @@ describe("durationSecondsForPerPotVolumeMl", () => {
 
   it("handles non-finite input", () => {
     expect(formatMl(Number.NaN)).toBe("0 ml");
-  });
-});
-
-describe("allDaysLabel / isAllDays", () => {
-  it("collapses all seven days into a single label", () => {
-    expect(isAllDays([0, 1, 2, 3, 4, 5, 6])).toBe(true);
-    expect(isAllDays([1, 2, 3, 4, 5, 6, 0])).toBe(true);
-    expect(isAllDays([0, 1, 2, 3, 4, 5])).toBe(false);
-    expect(isAllDays([])).toBe(false);
-  });
-
-  it("always labels in Portuguese", () => {
-    expect(allDaysLabel()).toBe("Todos os dias");
   });
 });
 

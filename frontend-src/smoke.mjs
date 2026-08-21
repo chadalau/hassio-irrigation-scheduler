@@ -62,7 +62,7 @@ console.log("schedule time 06:00:", text.includes("06:00"));
 const dayChips = [...root.querySelectorAll(".day-initial.active")].map((item) => item.textContent.trim());
 console.log("day chips (S/Q):", dayChips.includes("S") && dayChips.includes("Q"));
 console.log("duration 15 min:", text.includes("15 min"));
-console.log("next run present:", text.includes("Próximo"));
+console.log("next run present:", text.includes("Próxima"));
 
 if (!text.includes("Jardim") || !text.includes("06:00") || !text.includes("15 min") || !dayChips.includes("S") || !dayChips.includes("Q")) {
   throw new Error("card did not render expected content");

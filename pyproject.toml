@@ -3,6 +3,17 @@ target-version = "py313"
 line-length = 88
 
 [tool.ruff.lint]
-# Start CI with correctness-oriented rules. Import/style cleanup can be
-# introduced separately without rewriting the project's existing files.
-select = ["E9", "F63", "F7", "F82"]
+# Widened after a full review found several defects the original narrow set
+# (E9, F63, F7, F82) could not see: dead imports and a re-export with no
+# consumer (F401), an unpacked-and-ignored return value (RUF059) and
+# _LOGGER assignments sitting between imports (E402).
+#
+# - BLE is selected so the deliberate ``except Exception`` handlers keep
+#   carrying an explicit ``# noqa: BLE001 - <why>`` instead of being invisible
+#   (RUF100 would otherwise strip those directives, justification included).
+# - I keeps the import blocks sorted, which they were not.
+select = ["E", "F", "B", "SIM", "RUF", "I", "BLE"]
+# The only rule left out: reflowing 40+ existing lines to 88 columns would be
+# pure churn across files this project reviews by hand, with no correctness
+# gain. line-length above still documents the intent for new code.
+ignore = ["E501"]

@@ -10,7 +10,6 @@ schedule successfully starts a run.
 
 from __future__ import annotations
 
-from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
@@ -19,12 +18,11 @@ from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.util import dt as dt_util
-
 from pytest_homeassistant_custom_component.common import async_fire_time_changed_exact
 
 from custom_components.irrigation_scheduler.const import (
-    CONF_ENABLED,
     CONF_DEFAULT_DURATION,
+    CONF_ENABLED,
     CONF_MAX_DURATION,
     CONF_PH_ENTITY_ID,
     CONF_PH_MAX,

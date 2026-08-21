@@ -12,7 +12,6 @@ from datetime import timedelta
 
 from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
-
 from pytest_homeassistant_custom_component.common import async_fire_time_changed_exact
 
 from custom_components.irrigation_scheduler.const import (

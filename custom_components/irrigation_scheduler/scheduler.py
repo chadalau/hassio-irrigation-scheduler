@@ -1,12 +1,13 @@
 """Core scheduling engine for the Irrigation Scheduler integration.
 
-``compute_next_run`` (plus ``find_next_run``, ``resolve_target_services`` and
+``find_next_run`` (plus ``compute_next_run``, ``resolve_target_services`` and
 ``off_states``) live in :mod:`irrigation_scheduler.next_run`, a module with
 ZERO Home Assistant imports that can be unit tested with plain pytest. This
 module imports Home Assistant normally (no ``try/except ImportError`` guard:
 a missing/renamed HA symbol must fail loudly at load time, not silently in the
-middle of a watering run) and re-exports ``compute_next_run`` for backwards
-compatibility.
+middle of a watering run) and imports from ``next_run`` only what it actually
+uses -- importers of ``compute_next_run`` must take it from ``next_run``
+itself, which is where it lives and where the pure tests exercise it.
 
 The ``IrrigationScheduler`` class wires that logic to Home Assistant: it
 tracks the target entity, actuates it through the correct service for its
@@ -52,7 +53,7 @@ from datetime import datetime, timedelta
 from functools import partial
 from typing import Any, Callable
 
-from homeassistant.core import CoreState, Event, HomeAssistant, callback
+from homeassistant.core import CoreState, Event, HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
@@ -77,8 +78,8 @@ from .const import (
     CONF_PH_MAX_2,
     CONF_PH_MIN,
     CONF_PH_MIN_2,
-    CONF_RESERVOIR_REMAINING_L,
     CONF_RESERVOIR_ACCOUNTED_RUNS,
+    CONF_RESERVOIR_REMAINING_L,
     CONF_RESERVOIR_VOLUME_L,
     CONF_SCHEDULE_DURATION,
     CONF_SCHEDULE_ID,
@@ -98,7 +99,6 @@ from .const import (
     DEFAULT_PH_MIN,
     DEFAULT_PH_MIN_2,
     DEFAULT_RESERVOIR_VOLUME_L,
-    DOMAIN,
     HISTORY_MAX_ENTRIES,
     HISTORY_RETENTION_DAYS,
     MAX_SCHEDULE_DURATION,
@@ -111,7 +111,6 @@ from .const import (
     SOURCE_SCHEDULE,
 )
 from .next_run import (
-    compute_next_run,  # noqa: F401 - re-exported for backwards compatibility
     confirmed_off_states,
     find_next_run,
     off_states,
@@ -127,6 +126,21 @@ _LOGGER = logging.getLogger(__name__)
 # net that defensively turns the target off after the next boot.
 TURN_OFF_MAX_ATTEMPTS = 3
 TURN_OFF_RETRY_DELAY = 1
+
+# Backoff (seconds) for the IN-SESSION shutdown watchdog: the bounded retry
+# armed whenever a runtime store record is preserved because the target could
+# not be CONFIRMED off (restart recovery's defensive turn_off, the turn_off
+# retry loop in _async_finish_run, or an aborted run).
+#
+# Keeping the record so "the next boot retries" is the durable half of that
+# safety net, but on its own it leaves a possibly-open valve with NOTHING
+# watching it for the rest of the session -- and the most common cause is a
+# device that merely reports ``unavailable`` for a few seconds right after
+# startup and then comes back perfectly reachable. The first delays are short
+# so that case closes almost immediately; the later ones stretch out so a
+# genuinely dead device is not hammered. After the last one the watchdog gives
+# up loudly and the record stays for the next boot, as before.
+SHUTDOWN_WATCHDOG_DELAYS = (5, 15, 30, 60, 120, 300, 600)
 
 # schedule_warnings text for the two "the target never actuated at all"
 # failure shapes (turn_on itself raised, or the target never left its off
@@ -160,6 +174,15 @@ class IrrigationScheduler:
         self._unsub_stop: Callable[[], None] | None = None
         self._unsub_actuation: Callable[[], None] | None = None
         self._unsub_state: Callable[[], None] | None = None
+        self._unsub_watchdog: Callable[[], None] | None = None
+
+        # Shutdown watchdog: active while a runtime store record is preserved
+        # because the target could not be CONFIRMED off. It retries the
+        # defensive turn_off on the SHUTDOWN_WATCHDOG_DELAYS backoff and
+        # settles the record as soon as the target finally reports itself off
+        # (either through a retry or through the state listener).
+        self._watchdog_active = False
+        self._watchdog_attempt = 0
 
         # Active run state (in-memory mirror of the store).
         self._is_watering = False
@@ -603,6 +626,9 @@ class IrrigationScheduler:
         self._cancel_next()
         self._cancel_stop()
         self._cancel_actuation()
+        # The preserved record stays in the Store (the next boot re-arms the
+        # watchdog through _async_recover_state); only the timer goes.
+        self._async_clear_shutdown_watchdog()
         if self._unsub_state is not None:
             self._unsub_state()
             self._unsub_state = None
@@ -650,6 +676,14 @@ class IrrigationScheduler:
             if not isinstance(days, (list, tuple)):
                 continue
             for day in days:
+                # A day that is not hashable (a list/dict from a hand-edited
+                # or corrupted options payload) would raise TypeError on the
+                # dict lookup below and take down the whole service call.
+                # Skip it like every other malformed field is skipped -- the
+                # ``schedules`` property and ``find_next_run`` already ignore
+                # such an item, so it can never fire either way.
+                if not isinstance(day, int) or isinstance(day, bool):
+                    continue
                 slot = (day, schedule_time)
                 existing = occupied.get(slot)
                 if existing is not None:
@@ -817,8 +851,18 @@ class IrrigationScheduler:
                 run_uid,
                 *[item for item in accounted if isinstance(item, str) and item != run_uid],
             ][:HISTORY_MAX_ENTRIES]
+        # The flag is a ONE-SHOT consumed by the update listener, so it must
+        # only stay set when a listener is actually going to run:
+        # async_update_entry returns False WITHOUT calling any listener when
+        # the resulting options are identical to the stored ones (e.g. a
+        # legacy record with no run_uid deducting against an already-empty
+        # reservoir). Left set, it would silently swallow the NEXT genuine
+        # options change -- no reschedule, no card refresh.
         self._suppress_options_dispatch_once = True
-        self.hass.config_entries.async_update_entry(self.entry, options=options)
+        if not self.hass.config_entries.async_update_entry(
+            self.entry, options=options
+        ):
+            self._suppress_options_dispatch_once = False
 
     async def async_add_schedule(self, schedule: dict[str, Any]) -> None:
         """Append a schedule to the current list.
@@ -967,6 +1011,19 @@ class IrrigationScheduler:
         self._active_actuated = False
         self._active_run_uid = run_uid
 
+        # A record preserved by a shutdown that was never confirmed is about
+        # to be overwritten by async_save_entry below (unlike the external
+        # path, a deliberate start owns the target from here on, and its own
+        # stop timer is what closes it). Settle that older run's accounting
+        # FIRST: its run_uid, history entry and reservoir deduction would
+        # otherwise be destroyed silently, and "the next boot retries" would
+        # never happen because the record it needed is gone. Placed after
+        # _is_watering was set (no concurrent start can slip through this
+        # await) and before the record is replaced.
+        if self._watchdog_active:
+            await self._async_resolve_pending_record()
+            self._async_clear_shutdown_watchdog()
+
         try:
             await self.store.async_save_entry(
                 self.entry.entry_id,
@@ -1041,7 +1098,7 @@ class IrrigationScheduler:
             self._suppress_state_listener = True
             try:
                 await self._async_call_target_service(False)
-            except Exception:  # noqa: BLE001 - never block the abort path
+            except Exception:  # never block the abort path
                 _LOGGER.exception(
                     "Failed to defensively turn off %s", self.target_entity_id
                 )
@@ -1231,6 +1288,9 @@ class IrrigationScheduler:
                     self.entry.entry_id,
                 )
                 remove_state = False
+                # ...and keep trying in THIS session too, instead of leaving a
+                # possibly-open target unwatched until the next boot.
+                self._async_arm_shutdown_watchdog()
 
         # A new run may have started while the old target command was in
         # flight. Its target/store must be left alone, but the immutable
@@ -1367,13 +1427,20 @@ class IrrigationScheduler:
             "ec_unit_2": ec_unit_2,
         }
         try:
-            self._history, inserted = await self.store.async_append_history(
+            # The append is idempotent by run_uid, but whether THIS call
+            # inserted the record or found it already there does not change
+            # what the caller needs to know -- both mean "this run is in
+            # history". The reservoir deduction below is deduped
+            # independently, by the accounted-runs journal, deliberately NOT
+            # by this flag: a crash between a successful append and the
+            # deduction must still be able to deduct on the retry.
+            self._history, _inserted = await self.store.async_append_history(
                 self.entry.entry_id,
                 record,
                 max_age_days=HISTORY_RETENTION_DAYS,
                 max_entries=HISTORY_MAX_ENTRIES,
             )
-        except Exception:  # noqa: BLE001 - informational, never fatal
+        except Exception:  # informational, never fatal
             _LOGGER.exception(
                 "Failed to append watering history for %s", self.entry.entry_id
             )
@@ -1431,6 +1498,9 @@ class IrrigationScheduler:
                 self.target_entity_id,
                 self.entry.entry_id,
             )
+            # ...and keep trying in THIS session too (see
+            # _async_arm_shutdown_watchdog).
+            self._async_arm_shutdown_watchdog()
         self._reschedule_next()
         self._async_dispatch_update()
 
@@ -1651,6 +1721,13 @@ class IrrigationScheduler:
         if self._suppress_state_listener:
             return
         if not self._is_watering:
+            if self._watchdog_active:
+                # A preserved record is still waiting for a confirmed
+                # shutdown; that takes precedence over reading a still-on
+                # target as a brand-new external activation (which
+                # async_create_entry would refuse anyway).
+                await self._async_watchdog_state_changed()
+                return
             await self._async_maybe_start_external_run()
             return
         run_id = self._run_id
@@ -1887,6 +1964,186 @@ class IrrigationScheduler:
             self._unsub_actuation()
             self._unsub_actuation = None
 
+    def _cancel_watchdog(self) -> None:
+        if self._unsub_watchdog is not None:
+            self._unsub_watchdog()
+            self._unsub_watchdog = None
+
+    # ------------------------------------------------------------------
+    # Shutdown watchdog (target preserved as possibly-open)
+    # ------------------------------------------------------------------
+    def _async_arm_shutdown_watchdog(self) -> None:
+        """Watch a target that could not be CONFIRMED off, in THIS session.
+
+        Called from every path that preserves the runtime store record because
+        the target might still be open (restart recovery's defensive turn_off,
+        the turn_off retry loop in _async_finish_run, and _async_abort_run).
+        Keeping the record makes the NEXT boot retry; this makes the CURRENT
+        session retry too, instead of leaving a possibly-open valve with no
+        timer, no listener action and nothing else watching it until Home
+        Assistant happens to restart.
+        """
+        self._watchdog_active = True
+        self._cancel_watchdog()
+        index = min(self._watchdog_attempt, len(SHUTDOWN_WATCHDOG_DELAYS) - 1)
+        delay = SHUTDOWN_WATCHDOG_DELAYS[index]
+        _LOGGER.debug(
+            "Shutdown watchdog armed for %s: retrying turn_off of %s in %ss "
+            "(attempt %d/%d)",
+            self.entry.entry_id,
+            self.target_entity_id,
+            delay,
+            self._watchdog_attempt + 1,
+            len(SHUTDOWN_WATCHDOG_DELAYS),
+        )
+        self._unsub_watchdog = async_call_later(
+            self.hass, delay, self._async_watchdog_fired
+        )
+
+    def _async_clear_shutdown_watchdog(self) -> None:
+        """Stop watching: the record is settled, superseded or given up on."""
+        self._cancel_watchdog()
+        self._watchdog_active = False
+        self._watchdog_attempt = 0
+
+    async def _async_watchdog_fired(self, *_: Any) -> None:
+        """A backoff step elapsed: retry the defensive shutdown."""
+        self._unsub_watchdog = None
+        if not self._watchdog_active:
+            return
+        if self._is_watering:
+            # A newer run owns the target now and has its own stop timer.
+            self._async_clear_shutdown_watchdog()
+            return
+        if self._watchdog_attempt >= len(SHUTDOWN_WATCHDOG_DELAYS):
+            _LOGGER.error(
+                "Target %s could not be confirmed off after %d in-session "
+                "retries; giving up for now and keeping runtime state so the "
+                "next boot retries for %s",
+                self.target_entity_id,
+                self._watchdog_attempt,
+                self.entry.entry_id,
+            )
+            self._async_clear_shutdown_watchdog()
+            return
+        self._watchdog_attempt += 1
+        await self._async_attempt_pending_shutdown()
+
+    async def _async_attempt_pending_shutdown(self) -> bool:
+        """One defensive turn_off of a target left possibly open.
+
+        Returns True when the target is CONFIRMED off afterwards (and the
+        preserved record was settled), False when it must stay pending -- in
+        which case the next backoff step is armed.
+        """
+        if self._is_watering:
+            self._async_clear_shutdown_watchdog()
+            return True
+
+        self._suppress_state_listener = True
+        try:
+            await self._async_call_target_service(False)
+        except Exception:  # retried on the next backoff step
+            _LOGGER.exception(
+                "Watchdog turn_off of %s failed", self.target_entity_id
+            )
+        finally:
+            self._suppress_state_listener = False
+
+        if not self._async_target_is_off():
+            self._async_arm_shutdown_watchdog()
+            return False
+
+        _LOGGER.info(
+            "Target %s is finally confirmed off; settling the preserved "
+            "runtime record for %s",
+            self.target_entity_id,
+            self.entry.entry_id,
+        )
+        await self._async_resolve_pending_record()
+        self._async_clear_shutdown_watchdog()
+        self._async_dispatch_update()
+        return True
+
+    async def _async_watchdog_state_changed(self) -> None:
+        """The target reported a new state while a record is pending.
+
+        Only a CONFIRMED off is acted on here: it settles the record early,
+        without waiting for the next backoff step. An ``on`` report is left to
+        the timer on purpose -- retrying straight from the listener would loop
+        tightly against the echo of our own turn_off on a device that never
+        actually closes.
+        """
+        if not self._async_target_is_off():
+            return
+        _LOGGER.info(
+            "Target %s reported itself off; settling the preserved runtime "
+            "record for %s",
+            self.target_entity_id,
+            self.entry.entry_id,
+        )
+        await self._async_resolve_pending_record()
+        self._async_clear_shutdown_watchdog()
+        self._async_dispatch_update()
+
+    async def _async_resolve_pending_record(self) -> None:
+        """Log (if owed) and drop the preserved runtime record for this entry.
+
+        Reads the record from the Store rather than from a snapshot so the
+        ``actuated``/``history_logged`` markers are always the current ones:
+        _async_finish_run marks a surviving record as already logged, while a
+        record preserved by restart recovery has not been logged yet. Same
+        rules as the recovery path -- log only a run with persisted evidence
+        it really actuated and that was not logged before, and only drop the
+        record once that logging succeeded (otherwise it stays as the
+        accounting retry journal).
+        """
+        data = await self.store.async_load()
+        run_state = data["entries"].get(self.entry.entry_id)
+        if not run_state:
+            return
+        logged = True
+        if run_state.get("actuated") and not run_state.get("history_logged"):
+            logged = await self._async_log_recovered_run(run_state)
+        if logged:
+            await self.store.async_remove_entry(
+                self.entry.entry_id, expected_run_uid=run_state.get("run_uid")
+            )
+
+    async def _async_log_recovered_run(self, run_state: dict[str, Any]) -> bool:
+        """Append a stored (not in-memory) run record to history.
+
+        Best-effort duration/start reconstruction from the persisted payload,
+        exactly like the restart-recovery path it was extracted from: a
+        hand-edited/corrupted store may hold a naive datetime, which must be
+        normalized before it reaches _coerce_stored_duration or
+        _async_log_history (both subtract it from an aware datetime, and
+        naive - aware raises TypeError).
+        """
+        finishes_at = dt_util.parse_datetime(run_state.get("finishes_at") or "")
+        if finishes_at is None:
+            return True
+        finishes_at = dt_util.as_utc(finishes_at)
+        started_at = dt_util.parse_datetime(run_state.get("started_at") or "")
+        if started_at is not None:
+            started_at = dt_util.as_utc(started_at)
+        duration = self._coerce_stored_duration(
+            run_state.get("duration"), started_at, finishes_at
+        )
+        return await self._async_log_history(
+            started_at=started_at or (finishes_at - timedelta(seconds=duration)),
+            finished_at=finishes_at,
+            source=run_state.get("source"),
+            schedule_id=run_state.get("schedule_id"),
+            run_uid=run_state.get("run_uid"),
+            ph_value=run_state.get("ph_value"),
+            ec_value=run_state.get("ec_value"),
+            ec_unit=run_state.get("ec_unit"),
+            ph_value_2=run_state.get("ph_value_2"),
+            ec_value_2=run_state.get("ec_value_2"),
+            ec_unit_2=run_state.get("ec_unit_2"),
+        )
+
     # ------------------------------------------------------------------
     # Restart recovery
     # ------------------------------------------------------------------
@@ -1919,7 +2176,7 @@ class IrrigationScheduler:
             self._suppress_state_listener = True
             try:
                 await self._async_call_target_service(False)
-            except Exception:  # noqa: BLE001 - never block startup
+            except Exception:  # never block startup
                 _LOGGER.exception(
                     "Failed to defensively turn off %s",
                     self.target_entity_id,
@@ -1947,32 +2204,7 @@ class IrrigationScheduler:
                 # physical run in history and in the reservoir deduction.
                 logged = True
                 if run_state.get("actuated") and not run_state.get("history_logged"):
-                    recovered_started_at = dt_util.parse_datetime(
-                        run_state.get("started_at")
-                    )
-                    if recovered_started_at is not None:
-                        # Normalize a naive value (hand-edited/corrupted store)
-                        # before it reaches _coerce_stored_duration/_async_log_history,
-                        # both of which subtract it from an aware datetime --
-                        # naive - aware raises TypeError.
-                        recovered_started_at = dt_util.as_utc(recovered_started_at)
-                    duration = self._coerce_stored_duration(
-                        run_state.get("duration"), recovered_started_at, finishes_at
-                    )
-                    logged = await self._async_log_history(
-                        started_at=recovered_started_at
-                        or (finishes_at - timedelta(seconds=duration)),
-                        finished_at=finishes_at,
-                        source=run_state.get("source"),
-                        schedule_id=run_state.get("schedule_id"),
-                        run_uid=run_state.get("run_uid"),
-                        ph_value=run_state.get("ph_value"),
-                        ec_value=run_state.get("ec_value"),
-                        ec_unit=run_state.get("ec_unit"),
-                        ph_value_2=run_state.get("ph_value_2"),
-                        ec_value_2=run_state.get("ec_value_2"),
-                        ec_unit_2=run_state.get("ec_unit_2"),
-                    )
+                    logged = await self._async_log_recovered_run(run_state)
                 if logged:
                     await self.store.async_remove_entry(
                         self.entry.entry_id,
@@ -1985,6 +2217,11 @@ class IrrigationScheduler:
                     self.target_entity_id,
                     self.entry.entry_id,
                 )
+                # Do not wait for that next boot to be the only retry: watch
+                # the target for the rest of THIS session too. The usual cause
+                # is a device still reporting ``unavailable`` seconds after
+                # startup, which the first (short) backoff step catches.
+                self._async_arm_shutdown_watchdog()
                 return True
             return False
 

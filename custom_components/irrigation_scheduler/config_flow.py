@@ -6,7 +6,6 @@ import math
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
 from homeassistant.helpers import selector
@@ -344,28 +343,32 @@ class IrrigationSchedulerOptionsFlow(config_entries.OptionsFlow):
                     CONF_RESERVOIR_VOLUME_L: int(
                         user_input[CONF_RESERVOIR_VOLUME_L]
                     ),
-                    # ``.get(key, current)`` (NOT ``or DEFAULT``): the key is
-                    # absent from user_input when the form field was never
-                    # rendered with a value the user touched, and must then
-                    # preserve whatever was already configured -- ``or
-                    # DEFAULT`` would wipe an existing entity to "" any time
-                    # the key is missing, silently disabling the pH/EC gate.
-                    CONF_PH_ENTITY_ID: user_input.get(
-                        CONF_PH_ENTITY_ID, current_ph_entity
-                    ),
+                    # An ABSENT key means the user CLEARED that field, so it
+                    # clears the stored entity id (an empty string is the
+                    # meaningful "no sensor / gate disabled" value, same
+                    # convention as the set_zone_options service).
+                    #
+                    # This is safe precisely because each of these fields is
+                    # rendered with ``description={"suggested_value": ...}``
+                    # below: an untouched field comes back carrying the
+                    # currently configured entity id, so "absent" can only
+                    # mean the user emptied it. Defaulting to the stored value
+                    # instead made the two cases indistinguishable and left
+                    # the options UI unable to ever remove a pH/EC sensor --
+                    # the old value simply reappeared on every save.
+                    #
+                    # ``vol.Optional(key, default="")`` is NOT an option here:
+                    # EntitySelector rejects "" ("Entity  is neither a valid
+                    # entity ID nor a valid UUID"), so the key really has to
+                    # be absent and be interpreted here.
+                    CONF_PH_ENTITY_ID: user_input.get(CONF_PH_ENTITY_ID, ""),
                     CONF_PH_MIN: ph_min,
                     CONF_PH_MAX: ph_max,
-                    CONF_EC_ENTITY_ID: user_input.get(
-                        CONF_EC_ENTITY_ID, current_ec_entity
-                    ),
-                    CONF_PH_ENTITY_ID_2: user_input.get(
-                        CONF_PH_ENTITY_ID_2, current_ph_entity_2
-                    ),
+                    CONF_EC_ENTITY_ID: user_input.get(CONF_EC_ENTITY_ID, ""),
+                    CONF_PH_ENTITY_ID_2: user_input.get(CONF_PH_ENTITY_ID_2, ""),
                     CONF_PH_MIN_2: ph_min_2,
                     CONF_PH_MAX_2: ph_max_2,
-                    CONF_EC_ENTITY_ID_2: user_input.get(
-                        CONF_EC_ENTITY_ID_2, current_ec_entity_2
-                    ),
+                    CONF_EC_ENTITY_ID_2: user_input.get(CONF_EC_ENTITY_ID_2, ""),
                 }
                 # Saving options MUST NOT reload the entry (the update listener
                 # only recalculates the next firing).

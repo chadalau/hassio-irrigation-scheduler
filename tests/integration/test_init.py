@@ -6,10 +6,10 @@ Runs under pytest-homeassistant-custom-component (HA test venv only).
 from __future__ import annotations
 
 import pytest
-
-from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, Platform
+from homeassistant.const import STATE_ON, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 
 from custom_components.irrigation_scheduler.const import (
     CONF_DEFAULT_DURATION,

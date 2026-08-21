@@ -154,7 +154,7 @@ export class IrrigationScheduleCard extends LitElement {
   private _editingId: string | null = null;
 
   @state()
-  private _formTime = "06:00";
+  private _formTime = "00:00";
 
   @state()
   private _formDays: number[] = [];
@@ -163,7 +163,7 @@ export class IrrigationScheduleCard extends LitElement {
   private _formDurationHour = 0;
 
   @state()
-  private _formDurationMin = 15;
+  private _formDurationMin = 0;
 
   @state()
   private _formDurationSec = 0;
@@ -1319,10 +1319,10 @@ export class IrrigationScheduleCard extends LitElement {
         <span class="history-entry-detail">
           ${formatDuration(entry.duration)}
           ${perPot !== null ? html` · ${formatMl(perPot)}/vaso` : ""}
-          ${entry.ph_value !== null
+          ${typeof entry.ph_value === "number"
             ? html` · ${formatSensorReading(entry.ph_value)} PH`
             : ""}
-          ${entry.ec_value !== null
+          ${typeof entry.ec_value === "number"
             ? html` · EC ${formatSensorReading(entry.ec_value, entry.ec_unit ?? undefined)}`
             : ""}
           ${typeof entry.ph_value_2 === "number"
@@ -1567,14 +1567,6 @@ export class IrrigationScheduleCard extends LitElement {
   }
 
   /**
-   * Formats a header badge ("5.4 PH" / "EC 812.5 µS/cm"); ``missing`` while
-   * the configured entity is absent/unavailable/unparseable. ``render``
-   * receives the entity's OWN ``unit_of_measurement`` (may be undefined) so
-   * each badge decides for itself whether to use it -- the pH badge ignores
-   * it in favor of a fixed "PH" suffix, since some pH sensors set their own
-   * unit to "pH" too, which would otherwise duplicate ("PH 5.4pH").
-   */
-  /**
    * CSS modifier for the pH badge's color: "in-range" (green) / "out-of-range"
    * (red) when the current reading can be compared against ph_min/ph_max, or
    * "" (neutral) when the gate is disabled or the reading is unknown/invalid
@@ -1592,6 +1584,14 @@ export class IrrigationScheduleCard extends LitElement {
     return value >= phMin && value <= phMax ? "in-range" : "out-of-range";
   }
 
+  /**
+   * Formats a header badge ("5.4 PH" / "EC 812.5 µS/cm"); ``missing`` while
+   * the configured entity is absent/unavailable/unparseable. ``render``
+   * receives the entity's OWN ``unit_of_measurement`` (may be undefined) so
+   * each badge decides for itself whether to use it -- the pH badge ignores
+   * it in favor of a fixed "PH" suffix, since some pH sensors set their own
+   * unit to "pH" too, which would otherwise duplicate ("PH 5.4pH").
+   */
   private _sensorBadgeText(
     entityId: string,
     missing: string,
@@ -1702,6 +1702,33 @@ export class IrrigationScheduleCard extends LitElement {
       });
   }
 
+  /**
+   * Run a service call that has no dialog of its own to report into.
+   *
+   * `_callService` logs and RE-THROWS so the schedule/settings dialogs can
+   * render the backend's message inline; the direct actions (regar, parar,
+   * refil, toggle, excluir) have nowhere to render it, and leaving the
+   * rejection unhandled produced an "Uncaught (in promise)" with zero
+   * feedback for the user. Surfaced as Home Assistant's own toast instead --
+   * `hass-notification` is the standard event a Lovelace card fires to ask
+   * the dashboard shell to show one, the same way `hass-more-info` asks it to
+   * open a dialog.
+   */
+  private _callServiceNotifying(
+    service: string,
+    data: Record<string, unknown> = {},
+  ): void {
+    void this._callService(service, data).catch((error: unknown) => {
+      this.dispatchEvent(
+        new CustomEvent("hass-notification", {
+          detail: { message: this._describeServiceError(error) },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    });
+  }
+
   /** Best-effort human-readable message from a failed hass.callService(). */
   private _describeServiceError(error: unknown): string {
     if (error && typeof error === "object" && "message" in error) {
@@ -1714,7 +1741,7 @@ export class IrrigationScheduleCard extends LitElement {
   }
 
   private _waterNow(): void {
-    this._callService("water_now");
+    this._callServiceNotifying("water_now");
   }
 
   private _toggleMaster(entity: HassEntity, currentlyOn: boolean): void {
@@ -1737,22 +1764,25 @@ export class IrrigationScheduleCard extends LitElement {
   }
 
   private _stopWatering(): void {
-    this._callService("stop");
+    this._callServiceNotifying("stop");
   }
 
   private _refillReservoir(): void {
     if (window.confirm("Marcar o reservatório como reabastecido (volume cheio)?")) {
-      this._callService("refill_reservoir");
+      this._callServiceNotifying("refill_reservoir");
     }
   }
 
   private _toggleScheduleEnabled(schedule: Schedule): void {
-    this._callService("update_schedule", { id: schedule.id, enabled: !schedule.enabled });
+    this._callServiceNotifying("update_schedule", {
+      id: schedule.id,
+      enabled: !schedule.enabled,
+    });
   }
 
   private _deleteSchedule(schedule: Schedule): void {
     if (window.confirm(`Excluir o horário das ${formatTime(schedule.time)}?`)) {
-      this._callService("remove_schedule", { id: schedule.id });
+      this._callServiceNotifying("remove_schedule", { id: schedule.id });
     }
   }
 
@@ -1761,9 +1791,14 @@ export class IrrigationScheduleCard extends LitElement {
       return;
     }
     if (window.confirm(`Excluir o horário das ${this._formTime}?`)) {
-      this._callService("remove_schedule", { id: this._editingId }).then(() => {
-        this._closeDialog();
-      });
+      void this._callService("remove_schedule", { id: this._editingId }).then(
+        () => this._closeDialog(),
+        (error: unknown) => {
+          // The dialog stays open on failure, like _saveDialog: the user
+          // must see why the schedule is still there.
+          this._formError = this._describeServiceError(error);
+        },
+      );
     }
   }
 

@@ -11,9 +11,8 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from homeassistant.const import STATE_OFF, STATE_ON
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
-
 from pytest_homeassistant_custom_component.common import async_fire_time_changed_exact
 
 from custom_components.irrigation_scheduler.const import (
@@ -173,7 +172,7 @@ async def test_starting_the_schedule_again_clears_a_previous_warning(
     hass.states.async_set("switch.zone1", STATE_OFF)
     entry = await _setup_scheduled_zone(hass, setup_zone)
     scheduler = scheduler_of(entry)
-    scheduler._schedule_warnings["daily-06"] = "Tomada não ligou (verifique energia/conexão)"  # noqa: SLF001
+    scheduler._schedule_warnings["daily-06"] = "Tomada não ligou (verifique energia/conexão)"
     assert scheduler.next_run is not None
 
     async_fire_time_changed_exact(hass, scheduler.next_run)

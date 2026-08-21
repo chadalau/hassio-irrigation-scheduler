@@ -9,11 +9,13 @@ from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.irrigation_scheduler.const import (
     CONF_DEFAULT_DURATION,
+    CONF_EC_ENTITY_ID,
     CONF_ENABLED,
     CONF_FLOW_RATE_LPH,
     CONF_MAX_DURATION,
     CONF_NAME,
     CONF_NUMBER_OF_POTS,
+    CONF_PH_ENTITY_ID,
     CONF_RESERVOIR_VOLUME_L,
     CONF_SCHEDULES,
     CONF_TARGET_ENTITY_ID,
@@ -161,6 +163,90 @@ async def test_options_flow_changes_durations_without_reload_or_interrupt(
     assert entry.runtime_data is scheduler_before
     assert scheduler_of(entry).is_watering
     assert hass.states.get("switch.zone1").state == STATE_ON
+
+
+async def test_options_flow_can_clear_a_configured_ph_sensor(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """REGRESSION: clearing the pH/EC field in the options UI must actually
+    remove the sensor.
+
+    The frontend simply OMITS an emptied entity field from user_input, and the
+    handler used to fall back to the stored value for a missing key -- making
+    "cleared" and "untouched" indistinguishable, so the old entity id
+    reappeared on every save and the pH gate could never be disabled from the
+    integration's own UI (only through the set_zone_options service).
+
+    Untouched fields come back carrying their suggested_value, which is what
+    makes an absent key unambiguous. ``vol.Optional(key, default="")`` cannot
+    express this: EntitySelector rejects "".
+    """
+    entry = await setup_zone(
+        target_entity_id="switch.zone1",
+        options={
+            CONF_ENABLED: True,
+            CONF_DEFAULT_DURATION: 600,
+            CONF_MAX_DURATION: 7200,
+            CONF_PH_ENTITY_ID: "sensor.reservoir_ph",
+            CONF_EC_ENTITY_ID: "sensor.reservoir_ec",
+            CONF_SCHEDULES: [],
+        },
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_DEFAULT_DURATION: 10,
+            CONF_MAX_DURATION: 120,
+            CONF_FLOW_RATE_LPH: 0,
+            CONF_NUMBER_OF_POTS: 0,
+            CONF_RESERVOIR_VOLUME_L: 0,
+            # Both entity fields emptied by the user -> omitted by the form.
+            # The EC one is kept to prove an untouched field is preserved.
+            CONF_EC_ENTITY_ID: "sensor.reservoir_ec",
+        },
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+
+    assert entry.options[CONF_PH_ENTITY_ID] == ""
+    assert entry.options[CONF_EC_ENTITY_ID] == "sensor.reservoir_ec"
+    assert scheduler_of(entry).ph_entity_id == ""
+
+
+async def test_options_flow_keeps_a_sensor_submitted_unchanged(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """The other half of the contract: a field left as rendered (its
+    suggested_value comes back in user_input) keeps its stored value."""
+    entry = await setup_zone(
+        target_entity_id="switch.zone1",
+        options={
+            CONF_ENABLED: True,
+            CONF_DEFAULT_DURATION: 600,
+            CONF_MAX_DURATION: 7200,
+            CONF_PH_ENTITY_ID: "sensor.reservoir_ph",
+            CONF_SCHEDULES: [],
+        },
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={
+            CONF_DEFAULT_DURATION: 10,
+            CONF_MAX_DURATION: 120,
+            CONF_FLOW_RATE_LPH: 0,
+            CONF_NUMBER_OF_POTS: 0,
+            CONF_RESERVOIR_VOLUME_L: 0,
+            CONF_PH_ENTITY_ID: "sensor.reservoir_ph",
+        },
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+
+    assert entry.options[CONF_PH_ENTITY_ID] == "sensor.reservoir_ph"
 
 
 async def test_options_flow_opens_with_corrupt_persisted_values(

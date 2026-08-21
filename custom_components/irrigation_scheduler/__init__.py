@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.components.frontend import (
     DATA_EXTRA_MODULE_URL,
     add_extra_js_url,
@@ -22,7 +21,8 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse
 from homeassistant.exceptions import ServiceValidationError
-from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.target import (
     TargetSelection,
     async_extract_referenced_entity_ids,
@@ -33,14 +33,9 @@ from .const import (
     CARD_JS_FILENAME,
     CARD_JS_URL,
     CONF_DEFAULT_DURATION,
-    CONF_ENABLED,
-    CONF_SCHEDULE_DAYS,
-    CONF_SCHEDULE_DURATION,
-    CONF_SCHEDULE_ID,
-    CONF_SCHEDULE_TIME,
-    CONF_SCHEDULES,
     CONF_EC_ENTITY_ID,
     CONF_EC_ENTITY_ID_2,
+    CONF_ENABLED,
     CONF_FLOW_RATE_LPH,
     CONF_NUMBER_OF_POTS,
     CONF_PH_ENTITY_ID,
@@ -50,6 +45,11 @@ from .const import (
     CONF_PH_MIN,
     CONF_PH_MIN_2,
     CONF_RESERVOIR_VOLUME_L,
+    CONF_SCHEDULE_DAYS,
+    CONF_SCHEDULE_DURATION,
+    CONF_SCHEDULE_ID,
+    CONF_SCHEDULE_TIME,
+    CONF_SCHEDULES,
     DOMAIN,
     MAX_SCHEDULE_DURATION,
     MIN_DURATION,
@@ -65,11 +65,11 @@ from .const import (
     SERVICE_UPDATE_SCHEDULE,
     SERVICE_WATER_NOW,
 )
+from .scheduler import IrrigationScheduler
+from .schedules import new_schedule, serialize_schedule
+from .store import RuntimeStore
 
 _LOGGER = logging.getLogger(__name__)
-from .schedules import new_schedule, serialize_schedule
-from .scheduler import IrrigationScheduler
-from .store import RuntimeStore
 
 # The integration is config-entry-only: no YAML platform configuration.
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -171,6 +171,12 @@ SET_ZONE_OPTIONS_SCHEMA = vol.Schema(
 # not just the two fields present in a single call -- a schema-only check
 # here could not see a bound left unchanged from a previous call.
 
+# hass.data[DOMAIN] key marking that the card's static path has already been
+# registered with the HTTP component in this process. See
+# _async_register_frontend for why that half must NOT be repeated while the
+# extra module URL half must.
+DATA_CARD_PATH_REGISTERED = "card_path_registered"
+
 # Keys Home Assistant injects into a targeted service call. They are target
 # selectors (or frontend bookkeeping), not service data, and must be stripped
 # before voluptuous validation (the schemas are strict and reject extra keys).
@@ -223,6 +229,13 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up one irrigation zone (config entry)."""
     await _async_register_services(hass)
+    # Re-registered per entry for the same reason the services above are:
+    # _async_unregister_frontend() removes the card's extra module URL when
+    # the LAST entry unloads, and async_setup() does not run again when an
+    # entry is added afterwards (reload of the only zone, HACS update,
+    # remove + re-add). Both halves are idempotent -- see
+    # _async_register_frontend.
+    await _async_register_frontend(hass)
 
     hass.data.setdefault(DOMAIN, {})
     # A SINGLE RuntimeStore shared by every entry: all entries persist to the
@@ -273,12 +286,26 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 async def _async_register_frontend(hass: HomeAssistant) -> None:
     """Serve and register the card JS.
 
-    Runs ONCE during component setup (never per entry). The static path has no
-    trivial unregister API and intentionally stays for the process lifetime;
-    the extra JS URL is removed when the last entry unloads. Both registrations
-    are defensive: the backend must never fail to set up because the card file
-    or the frontend component is missing.
+    Called from component setup AND from every entry setup. The two halves are
+    idempotent in DIFFERENT ways, which is exactly why they are separated:
+
+    - the static path may only be registered ONCE per process. It has no
+      trivial unregister API (so it intentionally stays for the process
+      lifetime), and registering the same URL twice makes aiohttp raise
+      ``RuntimeError: Added route will never be executed, method GET is
+      already registered``. Hence the ``DATA_CARD_PATH_REGISTERED`` guard.
+    - the extra module URL MUST be re-added on every entry setup:
+      _async_unregister_frontend() removes it when the last entry unloads,
+      and component setup does not run again when an entry is added later.
+      Re-adding is free -- the frontend's UrlManager keeps its urls in a
+      frozenset -- and without it the card silently stops loading in new
+      browser sessions until Home Assistant restarts.
+
+    Both registrations are defensive: the backend must never fail to set up
+    because the card file or the frontend component is missing.
     """
+    domain_data = hass.data.setdefault(DOMAIN, {})
+
     if hass.http is None:
         _LOGGER.warning(
             "The http component is not loaded; cannot serve the Irrigation "
@@ -298,9 +325,11 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
         )
         return
 
-    await hass.http.async_register_static_paths(
-        [StaticPathConfig(CARD_JS_URL, str(js_path), cache_headers=False)]
-    )
+    if not domain_data.get(DATA_CARD_PATH_REGISTERED):
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(CARD_JS_URL, str(js_path), cache_headers=False)]
+        )
+        domain_data[DATA_CARD_PATH_REGISTERED] = True
 
     if hass.data.get(DATA_EXTRA_MODULE_URL) is None:
         # frontend is a declared dependency, but keep the backend alive if it

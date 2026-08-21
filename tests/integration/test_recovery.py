@@ -11,7 +11,6 @@ from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.util import dt as dt_util
-
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_time_changed_exact,

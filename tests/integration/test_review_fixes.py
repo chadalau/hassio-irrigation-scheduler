@@ -15,7 +15,6 @@ from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.util import dt as dt_util
-
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_time_changed_exact,
@@ -367,9 +366,9 @@ async def test_abort_run_clears_ph_ec_snapshot(
     await hass.async_block_till_done()
 
     assert not scheduler.is_watering
-    assert scheduler._active_ph_value is None  # noqa: SLF001
-    assert scheduler._active_ec_value is None  # noqa: SLF001
-    assert scheduler._active_ec_unit is None  # noqa: SLF001
+    assert scheduler._active_ph_value is None
+    assert scheduler._active_ec_value is None
+    assert scheduler._active_ec_unit is None
 
 
 # ---------------------------------------------------------------------------
