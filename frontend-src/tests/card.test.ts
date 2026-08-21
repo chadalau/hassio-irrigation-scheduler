@@ -1741,6 +1741,24 @@ describe("IrrigationScheduleCard summary block", () => {
   const today = (new Date().getDay() + 6) % 7;
   const otherDay = (today + 3) % 7;
 
+  it("uses the shared irrigation hero identity", async () => {
+    const card = await mountCard(
+      { "sensor.jardim_next_run": baseSensor({ reservoir_volume_l: 100 }) },
+      [],
+    );
+    const root = card.shadowRoot;
+
+    expect(root?.querySelector(".hero-eyebrow")?.textContent?.trim()).toBe(
+      "Irrigação",
+    );
+    expect(root?.querySelector(".hero-icon ha-icon")?.getAttribute("icon")).toBe(
+      "mdi:water-outline",
+    );
+    expect(root?.querySelector(".hero-rail")?.getAttribute("aria-label")).toBe(
+      "Nível do reservatório",
+    );
+  });
+
   it("counts today's enabled schedules and shows the next run", async () => {
     const sensor = baseSensor({
       schedules: [
@@ -1785,6 +1803,57 @@ describe("IrrigationScheduleCard summary block", () => {
     // 60 L/h * 1 h * 1 pot, every day -> 60 L/day.
     expect(summary(card).statLabel).toBe("Volume/dia");
     expect(summary(card).statValue).toBe("60 L");
+  });
+
+  it("prioritizes remaining reservoir volume and exposes its level", async () => {
+    const card = await mountCard(
+      {
+        "sensor.jardim_next_run": baseSensor({
+          reservoir_volume_l: 1000,
+          reservoir_remaining_l: 620,
+        }),
+      },
+      [],
+    );
+
+    expect(summary(card).statLabel).toBe("Reservatório");
+    expect(summary(card).statValue).toBe("620/1000 L");
+    expect(
+      card.shadowRoot?.querySelector(".hero-rail")?.getAttribute("aria-valuenow"),
+    ).toBe("62");
+  });
+
+  it("shows active watering and its remaining time in the hero", async () => {
+    const finishesAt = new Date(Date.now() + 2 * 60_000).toISOString();
+    const card = await mountCard(
+      {
+        "sensor.jardim_next_run": baseSensor(),
+        "switch.jardim_schedule_enabled": {
+          entity_id: "switch.jardim_schedule_enabled",
+          state: "on",
+          last_changed: "",
+          last_updated: "",
+          attributes: {},
+        },
+        "binary_sensor.jardim_watering": {
+          ...baseBinarySensor({
+            started_at: new Date(Date.now() - 2 * 60_000).toISOString(),
+            finishes_at: finishesAt,
+            duration: 240,
+            source: "schedule",
+            schedule_id: "s1",
+          }),
+          state: "on",
+        },
+      },
+      [],
+    );
+
+    expect(summary(card).headline).toBe("Regando agora");
+    expect(summary(card).next).toContain("restantes");
+    expect(card.shadowRoot?.querySelector(".status")?.textContent).toContain(
+      "Regando",
+    );
   });
 
   it("hides the volume stat entirely when no flow rate is configured", async () => {

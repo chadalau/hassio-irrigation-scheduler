@@ -331,7 +331,7 @@ export class IrrigationScheduleCard extends LitElement {
       ? "mdi:water"
       : switchOn
         ? "mdi:calendar-check-outline"
-        : "mdi:calendar-remove";
+        : "mdi:calendar-remove-outline";
 
     const finishesAt = this._stringAttr(binaryEntity, "finishes_at");
     const startedAt = this._stringAttr(binaryEntity, "started_at");
@@ -380,20 +380,57 @@ export class IrrigationScheduleCard extends LitElement {
     const showRow1 = Boolean(phEntityId || ecEntityId || reservoirVolume > 0);
     const showRow2 = Boolean(phEntityId2 || ecEntityId2);
     const bothReservoirs = showRow1 && showRow2;
+    const headline = wateringOn
+      ? "Regando agora"
+      : masterOff
+        ? "Agendamento desativado"
+        : todayCount === 1
+          ? "1 horário hoje"
+          : `${todayCount} horários hoje`;
+    const contextText =
+      wateringOn && finishesAt
+        ? `${formatRemaining(remaining)} restantes`
+        : !masterOff && showNextRun
+          ? `Próxima: ${this._nextRunText(sensor.state)}`
+          : "";
+    const summaryLabel =
+      reservoirVolume > 0
+        ? "Reservatório"
+        : avgDailyVolume > 0
+          ? "Volume/dia"
+          : "";
+    const summaryValue =
+      reservoirVolume > 0
+        ? formatVolumeFraction(reservoirRemaining, reservoirVolume)
+        : avgDailyVolume > 0
+          ? formatVolume(avgDailyVolume)
+          : "";
+    const reservoirLevelText =
+      reservoirVolume > 0
+        ? `${Math.round(reservoirPct)}% do reservatório disponível`
+        : "Reservatório não configurado";
     return html`
       <ha-card class=${compact ? "compact" : ""}>
-        <div class="header">
-            <div class="zone-icon">
-              <ha-icon icon="mdi:water"></ha-icon>
+        <header class="hero-header header">
+          <div class="hero-top">
+            <div class="hero-identity">
+              <div class="hero-icon zone-icon" aria-hidden="true">
+                <ha-icon icon="mdi:water-outline"></ha-icon>
+              </div>
+              <div class="hero-title-group">
+                <span class="hero-eyebrow">Irrigação</span>
+                <h2 class="header-title" title=${this._config.entity ?? ""}>
+                  ${this._zoneName(sensor)}
+                </h2>
+              </div>
             </div>
-            <h2 class="header-title" title=${this._config.entity ?? ""}>
-              ${this._zoneName(sensor)}
-            </h2>
-            <span class="status ${statusClass}">
-              <ha-icon icon=${statusIcon}></ha-icon>
-              ${statusText}
-            </span>
-            <div class="header-right">
+
+            <div class="hero-actions">
+              <span class="status status-chip ${statusClass}">
+                <ha-icon icon=${statusIcon}></ha-icon>
+                <span>${statusText}</span>
+              </span>
+              <div class="header-right">
               ${switchEntity
                 ? html`
                     <button
@@ -432,31 +469,37 @@ export class IrrigationScheduleCard extends LitElement {
               >
                 <ha-icon icon="mdi:cog-outline"></ha-icon>
               </button>
+              </div>
             </div>
-        </div>
+          </div>
 
-        <div class="summary">
-          <div class="summary-main">
-            <strong>
-              ${masterOff
-                ? "Agendamento desativado"
-                : todayCount === 1
-                  ? "1 horário hoje"
-                  : `${todayCount} horários hoje`}
-            </strong>
-            ${!masterOff && showNextRun
-              ? html`<span>Próxima: ${this._nextRunText(sensor.state)}</span>`
+          <div class="hero-summary summary">
+            <div class="hero-kpi summary-main">
+              <strong>${headline}</strong>
+              ${contextText ? html`<span>${contextText}</span>` : ""}
+            </div>
+            ${summaryLabel
+              ? html`
+                  <div class="hero-secondary summary-stat">
+                    <span>${summaryLabel}</span>
+                    <strong>${summaryValue}</strong>
+                  </div>
+                `
               : ""}
           </div>
-          ${avgDailyVolume > 0
-            ? html`
-                <div class="summary-stat">
-                  <span>Volume/dia</span>
-                  <strong>${formatVolume(avgDailyVolume)}</strong>
-                </div>
-              `
-            : ""}
-        </div>
+
+          <div
+            class="hero-rail ${reservoirVolume > 0 ? "" : "is-disabled"}"
+            role="progressbar"
+            aria-label="Nível do reservatório"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow=${Math.round(reservoirPct)}
+            aria-valuetext=${reservoirLevelText}
+          >
+            <span style="width: ${reservoirPct}%"></span>
+          </div>
+        </header>
 
         ${this._renderSettings(
           this._zoneName(sensor),

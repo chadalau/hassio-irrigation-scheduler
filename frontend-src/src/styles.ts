@@ -9,42 +9,122 @@ export const cardStyles = css`
     display: block;
     --w-blue: var(--primary-color, #03a9f4);
     --w-green: #76d84b;
+    --scheduler-header-accent: #00b8e6;
+    --scheduler-header-accent-rgb: 0, 184, 230;
+    --scheduler-state-ok: var(--w-green);
+    --scheduler-state-neutral: var(--secondary-text-color, #a0a0a0);
+  }
+
+  * {
+    box-sizing: border-box;
   }
 
   ha-card {
+    display: block;
     overflow: hidden;
+    --ha-card-border-color: rgba(var(--scheduler-header-accent-rgb), 0.26);
+  }
+
+  ha-card:not(:defined) {
+    border: 1px solid var(--ha-card-border-color);
+    border-radius: var(--ha-card-border-radius, 12px);
   }
 
   .card-body {
     padding: 0 16px 16px;
   }
 
-  .header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    padding: 14px 16px 0;
+  .hero-header {
+    position: relative;
+    padding: 15px 20px 13px;
+    overflow: hidden;
+    border-bottom: 1px solid rgba(var(--scheduler-header-accent-rgb), 0.26);
+    background:
+      radial-gradient(
+        circle at 0 0,
+        rgba(var(--scheduler-header-accent-rgb), 0.12),
+        transparent 42%
+      ),
+      linear-gradient(
+        115deg,
+        rgba(var(--scheduler-header-accent-rgb), 0.055),
+        rgba(127, 127, 127, 0.025) 48%,
+        transparent 78%
+      );
   }
 
-  .zone-icon {
-    width: 32px;
-    height: 32px;
-    flex-shrink: 0;
+  .hero-header::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.018),
+      transparent
+    );
+  }
+
+  .hero-top {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .hero-identity {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+  }
+
+  .hero-icon {
+    width: 46px;
+    height: 46px;
+    flex: none;
     display: grid;
     place-items: center;
+    border: 1px solid rgba(var(--scheduler-header-accent-rgb), 0.34);
     border-radius: 50%;
-    background: rgba(127, 127, 127, 0.22);
-    color: var(--primary-color, #03a9f4);
+    color: var(--scheduler-header-accent);
+    background: linear-gradient(
+      145deg,
+      rgba(var(--scheduler-header-accent-rgb), 0.18),
+      rgba(var(--scheduler-header-accent-rgb), 0.055)
+    );
+    box-shadow:
+      0 0 22px rgba(var(--scheduler-header-accent-rgb), 0.13),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
 
-  .zone-icon ha-icon {
-    --mdc-icon-size: 20px;
+  .hero-icon ha-icon {
+    --mdc-icon-size: 25px;
+    filter: drop-shadow(
+      0 0 6px rgba(var(--scheduler-header-accent-rgb), 0.35)
+    );
+  }
+
+  .hero-title-group {
+    min-width: 0;
+  }
+
+  .hero-eyebrow {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--scheduler-header-accent);
+    font-size: 9px;
+    line-height: 1.2;
+    font-weight: 800;
+    letter-spacing: 1.25px;
+    text-transform: uppercase;
   }
 
   .header-title {
     margin: 0;
-    flex: 1 1 110px;
     font-size: 20px;
     line-height: 1.2;
     font-weight: 700;
@@ -56,12 +136,15 @@ export const cardStyles = css`
     min-width: 0;
   }
 
-  .header-right {
+  .hero-actions {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 8px;
-    flex-shrink: 0;
-    margin-left: auto;
+  }
+
+  .header-right {
+    display: contents;
   }
 
   .icon-button {
@@ -87,16 +170,17 @@ export const cardStyles = css`
   /* Outlined chip rather than a filled pill: the state reads as a label on
      the card, not as a button competing with the toggle beside it. */
   .status {
-    flex-shrink: 0;
-    height: 24px;
-    padding: 0 8px;
+    flex: none;
+    height: 26px;
+    padding: 0 9px;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 4px;
     border: 1px solid currentColor;
-    border-radius: 5px;
-    font-size: 11px;
-    font-weight: 600;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
     white-space: nowrap;
   }
 
@@ -105,25 +189,28 @@ export const cardStyles = css`
   }
 
   .status-watering {
-    color: var(--primary-color, #03a9f4);
-    background: rgba(3, 169, 244, 0.09);
+    color: var(--scheduler-header-accent);
+    background: rgba(var(--scheduler-header-accent-rgb), 0.09);
   }
 
   .status-scheduled {
-    color: var(--w-green);
+    color: var(--scheduler-state-ok);
     background: rgba(73, 190, 42, 0.09);
   }
 
   .status-disabled {
-    color: var(--secondary-text-color);
+    color: var(--scheduler-state-neutral);
+    background: rgba(127, 127, 127, 0.06);
   }
 
-  .summary {
-    margin: 12px 16px 0;
+  .hero-summary {
+    position: relative;
+    z-index: 1;
+    margin-top: 14px;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: end;
-    gap: 14px;
+    gap: 18px;
   }
 
   .summary-main {
@@ -133,15 +220,20 @@ export const cardStyles = css`
   .summary-main strong {
     display: block;
     font-size: 22px;
-    line-height: 1.1;
-    letter-spacing: -0.35px;
+    line-height: 1.08;
+    font-weight: 750;
+    letter-spacing: -0.4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .summary-main span {
     display: block;
-    margin-top: 5px;
+    margin-top: 6px;
     color: var(--secondary-text-color);
-    font-size: 11px;
+    font-size: 10px;
+    line-height: 1.2;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -149,21 +241,48 @@ export const cardStyles = css`
 
   .summary-stat {
     text-align: right;
-    min-width: 78px;
+    min-width: 88px;
   }
 
   .summary-stat span {
     display: block;
-    font-size: 10px;
+    font-size: 9px;
+    line-height: 1.2;
+    letter-spacing: 0.35px;
+    text-transform: uppercase;
     color: var(--secondary-text-color);
   }
 
   .summary-stat strong {
     display: block;
-    margin-top: 1px;
-    font-size: 21px;
-    line-height: 1.1;
-    letter-spacing: -0.35px;
+    margin-top: 3px;
+    font-size: 20px;
+    line-height: 1;
+    letter-spacing: -0.25px;
+    white-space: nowrap;
+  }
+
+  .hero-rail {
+    position: relative;
+    z-index: 1;
+    height: 4px;
+    margin-top: 12px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(127, 127, 127, 0.26);
+  }
+
+  .hero-rail span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--scheduler-header-accent);
+    box-shadow: 0 0 8px rgba(var(--scheduler-header-accent-rgb), 0.32);
+    transition: width 0.25s linear;
+  }
+
+  .hero-rail.is-disabled {
+    opacity: 0.42;
   }
 
   .section-title {
@@ -1062,13 +1181,63 @@ export const cardStyles = css`
     padding: 0 12px 12px;
   }
 
-  .compact .header {
-    padding: 12px 12px 4px;
+  .compact .hero-header {
+    padding: 13px 16px 11px;
   }
 
   .compact .schedule-days,
   .compact .summary-main span,
   .compact .last-run {
     display: none;
+  }
+
+  @media (max-width: 390px) {
+    .hero-header {
+      padding-inline: 14px;
+    }
+
+    .hero-top {
+      gap: 8px;
+    }
+
+    .hero-identity {
+      gap: 8px;
+    }
+
+    .hero-icon {
+      width: 40px;
+      height: 40px;
+    }
+
+    .hero-icon ha-icon {
+      --mdc-icon-size: 22px;
+    }
+
+    .hero-actions {
+      gap: 5px;
+    }
+
+    .status {
+      width: 28px;
+      padding: 0;
+    }
+
+    .status > span {
+      display: none;
+    }
+
+    .summary-main strong {
+      font-size: 19px;
+    }
+
+    .summary-stat strong {
+      font-size: 18px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-rail span {
+      transition: none;
+    }
   }
 `;
