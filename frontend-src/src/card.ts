@@ -173,6 +173,12 @@ export class IrrigationScheduleCard extends LitElement {
 
   private _tickerId: number | null = null;
 
+  /**
+   * Immediate visual state for schedule toggles while Home Assistant processes
+   * the service call and publishes the updated sensor attributes.
+   */
+  private _scheduleEnabledOverrides = new Map<string, boolean>();
+
   static styles = cardStyles;
 
   static getConfigElement(): HTMLElement {
@@ -286,7 +292,19 @@ export class IrrigationScheduleCard extends LitElement {
     const showNextRun = this._config.show_next_run ?? DEFAULT_SHOW_NEXT_RUN;
     const showWaterNow = this._config.show_water_now ?? DEFAULT_SHOW_WATER_NOW;
     const labels = dayLabels();
-    const schedules = sortSchedulesByTime(sanitizeSchedules(sensor.attributes.schedules));
+    const schedules = sortSchedulesByTime(
+      sanitizeSchedules(sensor.attributes.schedules),
+    ).map((schedule) => {
+      const desired = this._scheduleEnabledOverrides.get(schedule.id);
+      if (desired === undefined) {
+        return schedule;
+      }
+      if (schedule.enabled === desired) {
+        this._scheduleEnabledOverrides.delete(schedule.id);
+        return schedule;
+      }
+      return { ...schedule, enabled: desired };
+    });
     const defaultDurationSec = this._numberAttr(sensor, "default_duration") ?? 600;
     const flowRate = this._numberAttr(sensor, "flow_rate_lph") ?? 0;
     const numberOfPots = this._numberAttr(sensor, "number_of_pots") ?? 0;
@@ -371,13 +389,9 @@ export class IrrigationScheduleCard extends LitElement {
             </button>
           `
         : "";
-    // R1's row also carries the (shared) volume/estimate/refill badges, so
-    // it must render even without any pH/EC sensor configured -- otherwise
-    // a zone with only reservoir_volume_l + flow_rate_lph set would show no
-    // reservoir controls at all. R2's row is purely about its own pH/EC:
-    // no reservoir fallback there, since the volume controls already show
-    // once on R1's row.
-    const showRow1 = Boolean(phEntityId || ecEntityId || reservoirVolume > 0);
+    // Volume and refill now live in the hero, so the body reservoir section
+    // exists only when it has pH/EC telemetry to show.
+    const showRow1 = Boolean(phEntityId || ecEntityId);
     const showRow2 = Boolean(phEntityId2 || ecEntityId2);
     const bothReservoirs = showRow1 && showRow2;
     const headline = wateringOn
@@ -407,7 +421,9 @@ export class IrrigationScheduleCard extends LitElement {
           : "";
     const reservoirLevelText =
       reservoirVolume > 0
-        ? `${Math.round(reservoirPct)}% do reservatório disponível`
+        ? `${Math.round(reservoirPct)}% do reservatório disponível${
+            estimateText ? `; restam ${estimateText}` : ""
+          }`
         : "Reservatório não configurado";
     return html`
       <ha-card class=${compact ? "compact" : ""}>
@@ -482,7 +498,10 @@ export class IrrigationScheduleCard extends LitElement {
               ? html`
                   <div class="hero-secondary summary-stat">
                     <span>${summaryLabel}</span>
-                    <strong>${summaryValue}</strong>
+                    <div class="summary-value-row">
+                      <strong>${summaryValue}</strong>
+                      ${reservoirVolume > 0 ? refillButton : ""}
+                    </div>
                   </div>
                 `
               : ""}
@@ -565,27 +584,6 @@ export class IrrigationScheduleCard extends LitElement {
                           : ""}
                       `}
                 </div>
-                ${reservoirVolume > 0
-                  ? html`
-                      <div class="reservoir-level">
-                        <div class="reservoir-level-top">
-                          <small>
-                            Volume${estimateText ? ` · restam ${estimateText}` : ""}
-                          </small>
-                          <strong>
-                            ${formatVolumeFraction(reservoirRemaining, reservoirVolume)}
-                          </strong>
-                          ${refillButton}
-                        </div>
-                        <div class="reservoir-level-bar">
-                          <div
-                            class="reservoir-level-fill"
-                            style="width: ${reservoirPct}%"
-                          ></div>
-                        </div>
-                      </div>
-                    `
-                  : ""}
               </div>
             `
           : ""}
@@ -1781,14 +1779,18 @@ export class IrrigationScheduleCard extends LitElement {
     data: Record<string, unknown> = {},
   ): void {
     void this._callService(service, data).catch((error: unknown) => {
-      this.dispatchEvent(
-        new CustomEvent("hass-notification", {
-          detail: { message: this._describeServiceError(error) },
-          bubbles: true,
-          composed: true,
-        }),
-      );
+      this._showServiceError(error);
     });
+  }
+
+  private _showServiceError(error: unknown): void {
+    this.dispatchEvent(
+      new CustomEvent("hass-notification", {
+        detail: { message: this._describeServiceError(error) },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   /** Best-effort human-readable message from a failed hass.callService(). */
@@ -1836,9 +1838,18 @@ export class IrrigationScheduleCard extends LitElement {
   }
 
   private _toggleScheduleEnabled(schedule: Schedule): void {
-    this._callServiceNotifying("update_schedule", {
+    const desired = !schedule.enabled;
+    this._scheduleEnabledOverrides.set(schedule.id, desired);
+    this.requestUpdate();
+    void this._callService("update_schedule", {
       id: schedule.id,
-      enabled: !schedule.enabled,
+      enabled: desired,
+    }).catch((error: unknown) => {
+      if (this._scheduleEnabledOverrides.get(schedule.id) === desired) {
+        this._scheduleEnabledOverrides.delete(schedule.id);
+        this.requestUpdate();
+      }
+      this._showServiceError(error);
     });
   }
 

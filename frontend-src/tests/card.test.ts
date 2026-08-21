@@ -617,7 +617,7 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
     expect(metricClasses).toEqual(["ph-metric", "ph-metric", "ec-metric", "ec-metric"]);
   });
 
-  it("shows the reservoir level ONCE even with two reservoirs configured", async () => {
+  it("shows the reservoir level and refill once in the hero", async () => {
     const card = await mountCard(
       {
         "sensor.jardim_next_run": baseSensor({
@@ -628,22 +628,22 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
       },
       [],
     );
-    // Only the pH/EC readings are per-reservoir; the zone tracks a single
-    // volume, so the level block renders once rather than per pH row.
-    const levels = card.shadowRoot?.querySelectorAll(".reservoir-level");
-    expect(levels).toHaveLength(1);
     expect(
-      levels?.[0].querySelector("strong")?.textContent?.trim(),
+      card.shadowRoot?.querySelector(".summary-stat strong")?.textContent?.trim(),
     ).toBe("1000/1000 L");
+    expect(
+      card.shadowRoot?.querySelector(".hero-rail")?.getAttribute("aria-valuenow"),
+    ).toBe("100");
+    expect(card.shadowRoot?.querySelectorAll(".reservoir-level")).toHaveLength(0);
     expect(card.shadowRoot?.querySelectorAll(".refill-button")).toHaveLength(1);
   });
 
-  it("does not show the reservoir level when reservoir_volume_l is not configured", async () => {
+  it("does not show the refill button when reservoir volume is not configured", async () => {
     const card = await mountCard(
       { "sensor.jardim_next_run": baseSensor({ ph_entity_id: "sensor.r1_ph" }) },
       [],
     );
-    expect(card.shadowRoot?.querySelectorAll(".reservoir-level")).toHaveLength(0);
+    expect(card.shadowRoot?.querySelector(".refill-button")).toBeNull();
   });
 
   it("does not render R2 badges when R2 is not configured", async () => {
@@ -660,7 +660,7 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
     expect(card.shadowRoot?.querySelectorAll(".ec-metric")).toHaveLength(1);
   });
 
-  it("shows the reservoir row (volume/estimate/refill) even without any pH/EC sensor configured", async () => {
+  it("keeps volume and refill in the hero without an empty body section", async () => {
     const card = await mountCard(
       {
         "sensor.jardim_next_run": baseSensor({
@@ -670,8 +670,11 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
       },
       [],
     );
-    expect(card.shadowRoot?.querySelector(".reservoir-level")).not.toBeNull();
+    expect(
+      card.shadowRoot?.querySelector(".summary-stat strong")?.textContent?.trim(),
+    ).toBe("1000/1000 L");
     expect(card.shadowRoot?.querySelector(".refill-button")).not.toBeNull();
+    expect(card.shadowRoot?.querySelector(".metrics")).toBeNull();
   });
 
   it("labels the tile plain 'pH' when only one reservoir is shown", async () => {
@@ -689,7 +692,7 @@ describe("IrrigationScheduleCard R2 (second reservoir) badges", () => {
     // No "R1" suffix: with a single reservoir there is nothing to
     // disambiguate against.
     expect(tile?.querySelector("small")?.textContent?.trim()).toBe("pH");
-    expect(card.shadowRoot?.querySelector(".reservoir-level")).not.toBeNull();
+    expect(card.shadowRoot?.querySelector(".refill-button")).not.toBeNull();
   });
 
   it("adds a 'Reservatório 2' header only when both reservoirs are shown", async () => {
@@ -763,8 +766,9 @@ describe("IrrigationScheduleCard reservoir consumption tracking", () => {
       },
       [],
     );
-    const level = card.shadowRoot?.querySelector(".reservoir-level");
-    expect(level?.querySelector("strong")?.textContent?.trim()).toBe(
+    expect(
+      card.shadowRoot?.querySelector(".summary-stat strong")?.textContent?.trim(),
+    ).toBe(
       "620/1000 L",
     );
   });
@@ -779,8 +783,9 @@ describe("IrrigationScheduleCard reservoir consumption tracking", () => {
       },
       [],
     );
-    const level = card.shadowRoot?.querySelector(".reservoir-level");
-    expect(level?.querySelector("strong")?.textContent?.trim()).toBe(
+    expect(
+      card.shadowRoot?.querySelector(".summary-stat strong")?.textContent?.trim(),
+    ).toBe(
       "1000/1000 L",
     );
   });
@@ -808,10 +813,9 @@ describe("IrrigationScheduleCard reservoir consumption tracking", () => {
       [],
     );
     // 60 L/h * 1h * 7 days/week -> 60 L/day avg -> 1000/60 ~= 16.7 days.
-    const caption = card.shadowRoot?.querySelector(".reservoir-level small");
-    expect(caption?.textContent?.replace(/\s+/g, " ").trim()).toBe(
-      "Volume · restam ~17 dias",
-    );
+    expect(
+      card.shadowRoot?.querySelector(".hero-rail")?.getAttribute("aria-valuetext"),
+    ).toContain("restam ~17 dias");
   });
 
   it("hides the estimate when there is no enabled schedule (avg consumption is 0)", async () => {
@@ -826,8 +830,9 @@ describe("IrrigationScheduleCard reservoir consumption tracking", () => {
       },
       [],
     );
-    const caption = card.shadowRoot?.querySelector(".reservoir-level small");
-    expect(caption?.textContent?.replace(/\s+/g, " ").trim()).toBe("Volume");
+    expect(
+      card.shadowRoot?.querySelector(".hero-rail")?.getAttribute("aria-valuetext"),
+    ).not.toContain("restam");
   });
 
   it("does not show a refill button when reservoir_volume_l is not configured", async () => {
@@ -838,7 +843,7 @@ describe("IrrigationScheduleCard reservoir consumption tracking", () => {
     expect(card.shadowRoot?.querySelector(".refill-button")).toBeNull();
   });
 
-  it("renders remaining/estimate/refill once, not per reservoir", async () => {
+  it("renders refill once in the hero, not per reservoir", async () => {
     const card = await mountCard(
       {
         "sensor.jardim_next_run": baseSensor({
@@ -850,10 +855,7 @@ describe("IrrigationScheduleCard reservoir consumption tracking", () => {
       },
       [],
     );
-    // The zone tracks ONE volume; only the pH/EC readings are per physical
-    // reservoir. The old layout duplicated these to fill a shared badge
-    // grid -- the level block now stands on its own below the tiles.
-    expect(card.shadowRoot?.querySelectorAll(".reservoir-level")).toHaveLength(1);
+    expect(card.shadowRoot?.querySelectorAll(".reservoir-level")).toHaveLength(0);
     expect(card.shadowRoot?.querySelectorAll(".refill-button")).toHaveLength(1);
   });
 
@@ -1667,12 +1669,86 @@ describe("IrrigationScheduleCard enable toggles", () => {
 
     enabled.click();
     disabled.click();
+    await card.updateComplete;
 
     expect(calls.map((c) => [c.service, c.data])).toEqual([
       ["update_schedule", { id: "s1", enabled: false }],
       ["update_schedule", { id: "s2", enabled: true }],
     ]);
     expect(calls.every((c) => c.domain === DOMAIN)).toBe(true);
+    const [optimisticDisabled, optimisticEnabled] = scheduleToggles(card);
+    expect(optimisticDisabled.getAttribute("aria-checked")).toBe("false");
+    expect(optimisticDisabled.classList.contains("off")).toBe(true);
+    expect(optimisticEnabled.getAttribute("aria-checked")).toBe("true");
+    expect(optimisticEnabled.classList.contains("off")).toBe(false);
+  });
+
+  it("rolls an optimistic toggle back when the backend rejects it", async () => {
+    let rejectCall: ((reason: unknown) => void) | undefined;
+    const sensor = baseSensor({
+      schedules: [
+        { id: "s1", time: "06:00:00", days: [0], duration: 600, enabled: true },
+      ],
+    });
+    const card = await mountCard({ "sensor.jardim_next_run": sensor }, []);
+    if (!card.hass) {
+      throw new Error("hass not mounted");
+    }
+    card.hass = {
+      ...card.hass,
+      callService: () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectCall = reject;
+        }),
+    };
+    await card.updateComplete;
+
+    scheduleToggles(card)[0].click();
+    await card.updateComplete;
+    expect(scheduleToggles(card)[0].getAttribute("aria-checked")).toBe("false");
+
+    rejectCall?.(new Error("Falha simulada"));
+    await Promise.resolve();
+    await Promise.resolve();
+    await card.updateComplete;
+    expect(scheduleToggles(card)[0].getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("releases the optimistic override after backend acknowledgement", async () => {
+    const calls: ServiceCallRecord[] = [];
+    const schedule = {
+      id: "s1",
+      time: "06:00:00",
+      days: [0],
+      duration: 600,
+      enabled: true,
+    };
+    const card = await mountCard(
+      { "sensor.jardim_next_run": baseSensor({ schedules: [schedule] }) },
+      calls,
+    );
+
+    scheduleToggles(card)[0].click();
+    await card.updateComplete;
+    expect(scheduleToggles(card)[0].getAttribute("aria-checked")).toBe("false");
+
+    card.hass = makeHass(
+      {
+        "sensor.jardim_next_run": baseSensor({
+          schedules: [{ ...schedule, enabled: false }],
+        }),
+      },
+      calls,
+    );
+    await card.updateComplete;
+    expect(scheduleToggles(card)[0].getAttribute("aria-checked")).toBe("false");
+
+    card.hass = makeHass(
+      { "sensor.jardim_next_run": baseSensor({ schedules: [schedule] }) },
+      calls,
+    );
+    await card.updateComplete;
+    expect(scheduleToggles(card)[0].getAttribute("aria-checked")).toBe("true");
   });
 
   it("names both toggles statically, leaving state to aria-checked", async () => {

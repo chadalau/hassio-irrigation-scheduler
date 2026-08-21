@@ -255,11 +255,19 @@ export const cardStyles = css`
 
   .summary-stat strong {
     display: block;
-    margin-top: 3px;
     font-size: 20px;
     line-height: 1;
     letter-spacing: -0.25px;
     white-space: nowrap;
+  }
+
+  .summary-value-row {
+    min-height: 22px;
+    margin-top: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
   }
 
   .hero-rail {
@@ -372,50 +380,6 @@ export const cardStyles = css`
     color: var(--error-color, #f44336);
   }
 
-  .reservoir-level {
-    margin-top: 6px;
-    padding: 7px 9px;
-    border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.22));
-    border-radius: 7px;
-    background: rgba(127, 127, 127, 0.045);
-  }
-
-  .reservoir-level-top {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .reservoir-level-top small {
-    flex: 1;
-    min-width: 0;
-    font-size: 9px;
-    color: var(--secondary-text-color);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .reservoir-level-top strong {
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-  }
-
-  .reservoir-level-bar {
-    height: 5px;
-    margin-top: 5px;
-    border-radius: 999px;
-    background: rgba(127, 127, 127, 0.28);
-    overflow: hidden;
-  }
-
-  .reservoir-level-fill {
-    height: 100%;
-    border-radius: inherit;
-    background: var(--primary-color, #03a9f4);
-  }
-
   .refill-button {
     flex-shrink: 0;
     display: inline-flex;
@@ -426,8 +390,9 @@ export const cardStyles = css`
     padding: 0;
     border: none;
     border-radius: 50%;
-    background: var(--secondary-background-color, rgba(255, 255, 255, 0.08));
-    color: var(--primary-color, #03a9f4);
+    border: 1px solid rgba(var(--scheduler-header-accent-rgb), 0.24);
+    background: rgba(var(--scheduler-header-accent-rgb), 0.08);
+    color: var(--scheduler-header-accent);
     cursor: pointer;
   }
 
