@@ -1276,6 +1276,22 @@ describe("IrrigationScheduleCard schedule status icons (done/pending/warning)", 
     expect(pending?.getAttribute("title")).toBe("Ainda vai regar hoje");
   });
 
+  it("reserves the same status slot whether an icon is present or not", async () => {
+    const card = await mountCard(
+      {
+        "sensor.jardim_next_run": baseSensor(),
+        "binary_sensor.jardim_watering": baseBinarySensor(),
+      },
+      [],
+    );
+    const rows = card.shadowRoot?.querySelectorAll(".schedule-row") ?? [];
+
+    expect(rows[0].querySelectorAll(".schedule-status-slot")).toHaveLength(1);
+    expect(rows[1].querySelectorAll(".schedule-status-slot")).toHaveLength(1);
+    expect(rows[0].querySelector(".schedule-status-slot")?.children).toHaveLength(0);
+    expect(rows[1].querySelector(".schedule-status-slot")?.children).toHaveLength(1);
+  });
+
   it("shows a done checkmark when a matching history entry confirms it ran today", async () => {
     const ranToday = historyRun({
       schedule_id: "s1",

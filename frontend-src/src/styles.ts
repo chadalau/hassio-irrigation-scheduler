@@ -550,7 +550,7 @@ export const cardStyles = css`
 
   .schedule-row {
     display: grid;
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: 7px;
     padding: 2px 8px;
@@ -627,8 +627,6 @@ export const cardStyles = css`
     outline-offset: 2px;
   }
 
-
-
   .schedule-info {
     display: flex;
     flex-direction: column;
@@ -674,6 +672,14 @@ export const cardStyles = css`
     --mdc-icon-size: 13px;
     color: var(--warning-color, #ff9800);
     flex-shrink: 0;
+  }
+
+  .schedule-status-slot {
+    width: 13px;
+    height: 13px;
+    flex: none;
+    display: grid;
+    place-items: center;
   }
 
   .status-icon {

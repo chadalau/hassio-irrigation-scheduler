@@ -799,31 +799,33 @@ export class IrrigationScheduleCard extends LitElement {
                 `,
               )}
             </div>
-            ${status === "warning"
-              ? html`
-                  <ha-icon
-                    class="warning-icon"
-                    icon="mdi:alert"
-                    title=${`Aviso: ${warning}`}
-                  ></ha-icon>
-                `
-              : status === "done"
+            <span class="schedule-status-slot">
+              ${status === "warning"
                 ? html`
                     <ha-icon
-                      class="status-icon status-done"
-                      icon="mdi:check-circle"
-                      title="Rega de hoje concluída"
+                      class="warning-icon"
+                      icon="mdi:alert"
+                      title=${`Aviso: ${warning}`}
                     ></ha-icon>
                   `
-                : status === "pending"
+                : status === "done"
                   ? html`
                       <ha-icon
-                        class="status-icon status-pending"
-                        icon="mdi:clock-outline"
-                        title="Ainda vai regar hoje"
+                        class="status-icon status-done"
+                        icon="mdi:check-circle"
+                        title="Rega de hoje concluída"
                       ></ha-icon>
                     `
-                  : ""}
+                  : status === "pending"
+                    ? html`
+                        <ha-icon
+                          class="status-icon status-pending"
+                          icon="mdi:clock-outline"
+                          title="Ainda vai regar hoje"
+                        ></ha-icon>
+                      `
+                    : ""}
+            </span>
           </div>
           <div class="schedule-duration">
             ${formatDuration(schedule.duration)}
