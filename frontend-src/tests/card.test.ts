@@ -147,8 +147,13 @@ describe("IrrigationScheduleCard pot sensor grid", () => {
       new Date(initialHistoryMessage?.end_time as string).getTime() -
         new Date(initialHistoryMessage?.start_time as string).getTime(),
     ).toBe(24 * 60 * 60_000);
-    expect(card.shadowRoot?.querySelector(".pot-sensor-line")?.getAttribute("d"))
-      .toContain("L");
+    // The request now goes through a Promise.race (timeout guard), which adds
+    // a microtask hop before the line lands in the DOM.
+    await vi.waitFor(() =>
+      expect(
+        card.shadowRoot?.querySelector(".pot-sensor-line")?.getAttribute("d"),
+      ).toContain("L"),
+    );
 
     const period = card.shadowRoot?.querySelector(
       ".pot-history-period",
@@ -1300,6 +1305,49 @@ describe("IrrigationScheduleCard pot sparkline fallbacks", () => {
       },
     };
   }
+
+  it("draws the sparkline as a REAL svg element, not an html lookalike", async () => {
+    // REGRESSION: the paths were interpolated with lit's `html` tag inside the
+    // <svg>. A nested template is parsed standalone, with no <svg> parent to
+    // inherit a namespace from, so the <path> elements were created in the
+    // HTML namespace: present in the DOM, correct `d`, correct computed
+    // stroke -- and completely invisible, because the browser does not render
+    // an HTML <path>. Every DOM-presence assertion passed while the card
+    // showed nothing, which is why this checks the namespace itself.
+    const card = makeCard();
+    card.hass = {
+      ...makeHass(
+        {
+          "sensor.jardim_next_run": baseSensor({ pot_sensors: cfg }),
+          "sensor.mesa_1": {
+            entity_id: "sensor.mesa_1",
+            state: "51",
+            last_changed: "",
+            last_updated: "",
+            attributes: { unit_of_measurement: "%" },
+          },
+        },
+        [],
+      ),
+      callWS: (async (message: Record<string, unknown>) =>
+        message.type === "recorder/statistics_during_period"
+          ? {}
+          : { "sensor.mesa_1": [{ s: "44" }, { s: "48" }, { s: "51" }] }) as never,
+    };
+    card.setConfig({ ...VALID_CONFIG });
+    document.body.appendChild(card);
+    attachedCards.push(card);
+    await card.updateComplete;
+
+    const line = await vi.waitFor(() => {
+      const found = card.shadowRoot?.querySelector(".pot-sensor-line");
+      expect(found).not.toBeNull();
+      return found as Element;
+    });
+    const area = card.shadowRoot?.querySelector(".pot-sensor-area");
+    expect(line.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(area?.namespaceURI).toBe("http://www.w3.org/2000/svg");
+  });
 
   it("falls back to the raw connection when hass has no callWS", async () => {
     // REGRESSION: a hass without callWS made the whole load return early,

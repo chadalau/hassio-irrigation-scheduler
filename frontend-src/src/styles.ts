@@ -423,8 +423,8 @@ export const cardStyles = css`
   .pot-sensor-tile {
     position: relative;
     min-width: 0;
-    height: 59px;
-    padding: 7px 8px 4px;
+    height: 54px;
+    padding: 6px 8px 4px;
     overflow: hidden;
     text-align: left;
     border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2));
@@ -439,37 +439,41 @@ export const cardStyles = css`
     background: rgba(var(--scheduler-header-accent-rgb), 0.055);
   }
 
+  /* Identity on ONE line (drop + name + reading) instead of a stacked block:
+     the sparkline is the reason this tile exists, and stacking spent more
+     than half the height on text that reads just as well side by side. */
   .pot-sensor-copy {
     position: relative;
     z-index: 1;
     display: flex;
-    align-items: flex-start;
-    gap: 5px;
+    align-items: baseline;
+    gap: 4px;
   }
 
   .pot-sensor-copy ha-icon {
-    --mdc-icon-size: 14px;
-    margin-top: 1px;
+    --mdc-icon-size: 13px;
+    align-self: center;
+    flex-shrink: 0;
     color: var(--scheduler-header-accent);
   }
 
   .pot-sensor-copy small,
   .pot-sensor-copy strong {
-    display: block;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .pot-sensor-copy small {
-    max-width: 75px;
+    flex: 1;
+    min-width: 0;
     color: var(--secondary-text-color);
-    font-size: 9px;
+    font-size: 10px;
   }
 
   .pot-sensor-copy strong {
-    margin-top: 1px;
-    font-size: 11px;
+    flex-shrink: 0;
+    font-size: 12px;
     color: var(--scheduler-header-accent);
   }
 
@@ -477,7 +481,7 @@ export const cardStyles = css`
     position: absolute;
     inset: auto 5px 3px 5px;
     width: calc(100% - 10px);
-    height: 22px;
+    height: 30px;
     overflow: visible;
   }
 

@@ -1,4 +1,4 @@
-import { LitElement, html, PropertyValues, TemplateResult } from "lit";
+import { LitElement, html, svg, PropertyValues, TemplateResult } from "lit";
 import { property, state } from "lit/decorators.js";
 
 import {
@@ -983,14 +983,21 @@ export class IrrigationScheduleCard extends LitElement {
       >
         <span class="pot-sensor-copy">
           <ha-icon icon="mdi:water-percent"></ha-icon>
-          <span>
-            <small>${config.name}</small>
-            <strong>${Number.isFinite(value) ? `${Math.round(value)}${unit}` : "—"}</strong>
-          </span>
+          <small>${config.name}</small>
+          <strong>${Number.isFinite(value) ? `${Math.round(value)}${unit}` : "—"}</strong>
         </span>
         <svg viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
           ${path
-            ? html`
+            ? // MUST be lit's `svg` tag, not `html`: a nested template is
+              // parsed standalone, with no <svg> parent to inherit a
+              // namespace from, so `html` produces <path> elements in the
+              // HTML namespace. They land in the DOM with the right `d` and
+              // the right computed stroke -- querySelector finds them, CSS
+              // applies -- and the browser draws NOTHING, because an HTML
+              // <path> is as inert as a <div>. That is exactly why the
+              // sparkline was invisible while every check said it was fine;
+              // the giveaway is `getBBox is not a function` on the element.
+              svg`
                 <path class="pot-sensor-area" d=${`${path} L100 28 L0 28 Z`}></path>
                 <path class="pot-sensor-line" d=${path}></path>
               `
@@ -1076,15 +1083,32 @@ export class IrrigationScheduleCard extends LitElement {
    * going quiet.
    */
   private _callWS<T>(message: Record<string, unknown>): Promise<T> | null {
+    let request: Promise<T> | null = null;
     if (this.hass?.callWS) {
-      return this.hass.callWS<T>(message);
+      request = this.hass.callWS<T>(message);
+    } else {
+      const connection = this.hass?.connection;
+      const send = connection?.sendMessagePromise;
+      if (connection && send) {
+        request = send.call(connection, message) as Promise<T>;
+      }
     }
-    const connection = this.hass?.connection;
-    const send = connection?.sendMessagePromise;
-    if (connection && send) {
-      return send.call(connection, message) as Promise<T>;
+    if (!request) {
+      return null;
     }
-    return null;
+    // A websocket command that never settles would leave the tiles stuck on
+    // "Carregando…" forever, which looks exactly like the silent blank this
+    // whole area is meant to stop producing. Losing the race is reported as a
+    // rejection, so it lands in the same log and label as any other failure.
+    return Promise.race([
+      request,
+      new Promise<T>((_resolve, reject) =>
+        setTimeout(
+          () => reject(new Error(`timeout em ${String(message.type)}`)),
+          15_000,
+        ),
+      ),
+    ]);
   }
 
   /** Append the current reading of each pot sensor to the live buffer. */
