@@ -94,7 +94,7 @@ describe("IrrigationScheduleCard pot sensor grid", () => {
     expect(tiles[5].textContent).toContain("Fileira 6");
   });
 
-  it("loads and draws the native Home Assistant history for the last 24 hours", async () => {
+  it("loads and draws the native Home Assistant history for the selected period", async () => {
     const configured = [{ name: "Mesa 1", entity_id: "sensor.mesa_1" }];
     const callWSMock = vi.fn<(message: Record<string, unknown>) => void>();
     const callWS: NonNullable<HomeAssistant["callWS"]> = async <T>(message: Record<string, unknown>) => {
@@ -126,8 +126,27 @@ describe("IrrigationScheduleCard pot sensor grid", () => {
       entity_ids: ["sensor.mesa_1"],
       minimal_response: true,
     });
+    const initialMessage = callWSMock.mock.calls[0][0];
+    expect(
+      new Date(initialMessage.end_time as string).getTime() -
+        new Date(initialMessage.start_time as string).getTime(),
+    ).toBe(24 * 60 * 60_000);
     expect(card.shadowRoot?.querySelector(".pot-sensor-tile path")?.getAttribute("d"))
       .toContain("L");
+
+    const period = card.shadowRoot?.querySelector(
+      ".pot-history-period",
+    ) as HTMLSelectElement;
+    expect(period.value).toBe("24");
+    period.value = "6";
+    period.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() => expect(callWSMock).toHaveBeenCalledTimes(2));
+
+    const sixHourMessage = callWSMock.mock.calls[1][0];
+    expect(
+      new Date(sixHourMessage.end_time as string).getTime() -
+        new Date(sixHourMessage.start_time as string).getTime(),
+    ).toBe(6 * 60 * 60_000);
   });
 
   it("saves names and entities configured through the modern settings section", async () => {

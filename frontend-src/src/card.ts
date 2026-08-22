@@ -50,6 +50,7 @@ import type {
 } from "./types";
 
 type SettingsSection = "general" | "reservoir1" | "reservoir2" | "potSensors";
+type PotHistoryHours = 6 | 12 | 24;
 
 interface HistoryState {
   s?: string;
@@ -110,6 +111,9 @@ export class IrrigationScheduleCard extends LitElement {
 
   @state()
   private _potSensorHistory = new Map<string, number[]>();
+
+  @state()
+  private _potHistoryHours: PotHistoryHours = 24;
 
   private _potHistoryKey = "";
   private _potHistoryLoadedAt = 0;
@@ -889,7 +893,17 @@ export class IrrigationScheduleCard extends LitElement {
       <section class="card-body pot-sensors-section" aria-label="Sensores dos vasos">
         <div class="pot-sensors-heading">
           <h3 class="section-title">Sensores dos vasos</h3>
-          <span>24 h</span>
+          <select
+            class="pot-history-period"
+            aria-label="Período do histórico dos sensores dos vasos"
+            title="Período do gráfico"
+            .value=${String(this._potHistoryHours)}
+            @change=${this._changePotHistoryHours}
+          >
+            <option value="6">6 h</option>
+            <option value="12">12 h</option>
+            <option value="24">24 h</option>
+          </select>
         </div>
         <div class="pot-sensors-grid">
           ${sensors.map((sensor) => this._renderPotSensor(sensor))}
@@ -971,10 +985,26 @@ export class IrrigationScheduleCard extends LitElement {
     });
   }
 
+  private _changePotHistoryHours(event: Event): void {
+    const value = Number.parseInt((event.currentTarget as HTMLSelectElement).value, 10);
+    if (value !== 6 && value !== 12 && value !== 24) {
+      return;
+    }
+    if (value === this._potHistoryHours) {
+      return;
+    }
+    this._potHistoryHours = value;
+    this._potHistoryLoadedAt = 0;
+    this._potHistoryKey = "";
+    this._potSensorHistory = new Map();
+    this._potHistoryRequestId += 1;
+    this._loadPotSensorHistory();
+  }
+
   private _loadPotSensorHistory(): void {
     const sensors = this._potSensorsAttr(this._sensorEntity);
     const ids = sensors.map((sensor) => sensor.entity_id);
-    const key = ids.join("|");
+    const key = `${this._potHistoryHours}:${ids.join("|")}`;
     if (key !== this._potHistoryKey) {
       this._potHistoryKey = key;
       this._potHistoryLoadedAt = 0;
@@ -990,7 +1020,7 @@ export class IrrigationScheduleCard extends LitElement {
     this._potHistoryLoadedAt = Date.now();
     const requestId = ++this._potHistoryRequestId;
     const end = new Date();
-    const start = new Date(end.getTime() - 24 * 60 * 60_000);
+    const start = new Date(end.getTime() - this._potHistoryHours * 60 * 60_000);
     void this.hass
       .callWS<Record<string, HistoryState[]>>({
         type: "history/history_during_period",
@@ -1051,7 +1081,7 @@ export class IrrigationScheduleCard extends LitElement {
       general: "Parâmetros usados nos cálculos de volume e duração.",
       reservoir1: "Sensores e faixa segura do reservatório principal.",
       reservoir2: "Segundo reservatório opcional e independente.",
-      potSensors: "Organize os sensores que aparecem no resumo de 24 horas.",
+      potSensors: "Organize os sensores que aparecem no resumo do período selecionado.",
     }[this._settingsSection];
     return html`
       <div class="overlay" @click=${this._closeSettings}>

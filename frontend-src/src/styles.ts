@@ -395,12 +395,23 @@ export const cardStyles = css`
     margin: 0;
   }
 
-  .pot-sensors-heading > span {
+  .pot-history-period {
     padding: 3px 7px;
     border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.22));
     border-radius: 5px;
+    background: rgba(127, 127, 127, 0.035);
     color: var(--secondary-text-color);
+    font-family: inherit;
     font-size: 9px;
+    line-height: 1.3;
+    cursor: pointer;
+  }
+
+  .pot-history-period:hover,
+  .pot-history-period:focus-visible {
+    border-color: rgba(var(--scheduler-header-accent-rgb), 0.58);
+    color: var(--scheduler-header-accent);
+    outline: none;
   }
 
   .pot-sensors-grid {
