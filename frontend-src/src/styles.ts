@@ -481,12 +481,26 @@ export const cardStyles = css`
     overflow: visible;
   }
 
-  .pot-sensor-tile path {
+  .pot-sensor-line {
     fill: none;
     stroke: var(--scheduler-header-accent);
-    stroke-width: 1.25;
+    stroke-width: 1.65;
     vector-effect: non-scaling-stroke;
-    opacity: 0.72;
+    opacity: 0.95;
+  }
+
+  .pot-sensor-area {
+    fill: rgba(var(--scheduler-header-accent-rgb), 0.11);
+    stroke: none;
+  }
+
+  .pot-sensor-history-state {
+    position: absolute;
+    right: 7px;
+    bottom: 6px;
+    color: var(--secondary-text-color);
+    font-size: 8px;
+    opacity: 0.8;
   }
 
   .refill-button {

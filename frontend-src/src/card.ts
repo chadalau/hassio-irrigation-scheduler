@@ -53,8 +53,13 @@ type SettingsSection = "general" | "reservoir1" | "reservoir2" | "potSensors";
 type PotHistoryHours = 6 | 12 | 24;
 
 interface HistoryState {
-  s?: string;
-  state?: string;
+  s?: string | number;
+  state?: string | number;
+}
+
+interface StatisticState {
+  mean?: number | null;
+  state?: number | null;
 }
 
 /** Minimal shape for elements exposing a `checked` property. */
@@ -114,6 +119,9 @@ export class IrrigationScheduleCard extends LitElement {
 
   @state()
   private _potHistoryHours: PotHistoryHours = 24;
+
+  @state()
+  private _potHistoryStatus: "idle" | "loading" | "ready" | "empty" | "error" = "idle";
 
   private _potHistoryKey = "";
   private _potHistoryLoadedAt = 0;
@@ -920,8 +928,19 @@ export class IrrigationScheduleCard extends LitElement {
         ? entity.attributes.unit_of_measurement
         : "%";
     const history = this._potSensorHistory.get(config.entity_id) ?? [];
-    const points = Number.isFinite(value) ? [...history, value] : history;
+    const points =
+      history.length > 0 && Number.isFinite(value) ? [...history, value] : history;
     const path = this._sparklinePath(points);
+    const emptyLabel =
+      this._potHistoryStatus === "ready" && history.length === 0
+        ? "Sem histórico"
+        : {
+            idle: "",
+            loading: "Carregando…",
+            ready: "",
+            empty: "Sem histórico",
+            error: "Histórico indisponível",
+          }[this._potHistoryStatus];
     return html`
       <button
         type="button"
@@ -937,8 +956,16 @@ export class IrrigationScheduleCard extends LitElement {
           </span>
         </span>
         <svg viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
-          ${path ? html`<path d=${path}></path>` : ""}
+          ${path
+            ? html`
+                <path class="pot-sensor-area" d=${`${path} L100 28 L0 28 Z`}></path>
+                <path class="pot-sensor-line" d=${path}></path>
+              `
+            : ""}
         </svg>
+        ${!path && emptyLabel
+          ? html`<span class="pot-sensor-history-state">${emptyLabel}</span>`
+          : ""}
       </button>
     `;
   }
@@ -948,12 +975,15 @@ export class IrrigationScheduleCard extends LitElement {
     if (finite.length === 0) {
       return "";
     }
+    if (finite.length === 1) {
+      return "M0 14 L100 14";
+    }
     const min = Math.min(...finite);
     const max = Math.max(...finite);
     const range = Math.max(1, max - min);
     return finite
       .map((value, index) => {
-        const x = finite.length === 1 ? 100 : (index / (finite.length - 1)) * 100;
+        const x = (index / (finite.length - 1)) * 100;
         const y = 25 - ((value - min) / range) * 22;
         return `${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`;
       })
@@ -997,6 +1027,7 @@ export class IrrigationScheduleCard extends LitElement {
     this._potHistoryLoadedAt = 0;
     this._potHistoryKey = "";
     this._potSensorHistory = new Map();
+    this._potHistoryStatus = "idle";
     this._potHistoryRequestId += 1;
     this._loadPotSensorHistory();
   }
@@ -1009,6 +1040,7 @@ export class IrrigationScheduleCard extends LitElement {
       this._potHistoryKey = key;
       this._potHistoryLoadedAt = 0;
       this._potSensorHistory = new Map();
+      this._potHistoryStatus = "idle";
     }
     if (
       ids.length === 0 ||
@@ -1018,11 +1050,11 @@ export class IrrigationScheduleCard extends LitElement {
       return;
     }
     this._potHistoryLoadedAt = Date.now();
+    this._potHistoryStatus = "loading";
     const requestId = ++this._potHistoryRequestId;
     const end = new Date();
     const start = new Date(end.getTime() - this._potHistoryHours * 60 * 60_000);
-    void this.hass
-      .callWS<Record<string, HistoryState[]>>({
+    const historyRequest = this.hass.callWS<Record<string, HistoryState[]>>({
         type: "history/history_during_period",
         start_time: start.toISOString(),
         end_time: end.toISOString(),
@@ -1030,24 +1062,56 @@ export class IrrigationScheduleCard extends LitElement {
         minimal_response: true,
         no_attributes: true,
         significant_changes_only: false,
-      })
-      .then((response) => {
+      });
+    const statisticsRequest = this.hass.callWS<Record<string, StatisticState[]>>({
+      type: "recorder/statistics_during_period",
+      start_time: start.toISOString(),
+      end_time: end.toISOString(),
+      statistic_ids: ids,
+      period: "5minute",
+      types: ["mean"],
+    });
+    void Promise.allSettled([historyRequest, statisticsRequest])
+      .then(([historyResult, statisticsResult]) => {
         if (requestId !== this._potHistoryRequestId || key !== this._potHistoryKey) {
           return;
         }
         const next = new Map<string, number[]>();
         for (const id of ids) {
-          const states = Array.isArray(response?.[id]) ? response[id] : [];
-          const values = states
-            .map((state) => Number.parseFloat(state.s ?? state.state ?? ""))
+          const statistics =
+            statisticsResult.status === "fulfilled" &&
+            Array.isArray(statisticsResult.value?.[id])
+              ? statisticsResult.value[id]
+              : [];
+          const statisticValues = statistics
+            .map((state) => state.mean ?? state.state ?? Number.NaN)
             .filter(Number.isFinite);
+          const states =
+            historyResult.status === "fulfilled" && Array.isArray(historyResult.value?.[id])
+              ? historyResult.value[id]
+              : [];
+          const historyValues = states
+            .map((state) => Number.parseFloat(String(state.s ?? state.state ?? "")))
+            .filter(Number.isFinite);
+          const values = statisticValues.length > 0 ? statisticValues : historyValues;
           next.set(id, values);
         }
         this._potSensorHistory = next;
+        const hasValues = [...next.values()].some((values) => values.length > 0);
+        this._potHistoryStatus = hasValues
+          ? "ready"
+          : historyResult.status === "rejected" && statisticsResult.status === "rejected"
+            ? "error"
+            : "empty";
+        if (historyResult.status === "rejected" && statisticsResult.status === "rejected") {
+          this._potHistoryLoadedAt = Date.now() - 4.5 * 60_000;
+          console.warn(
+            "[irrigation-schedule-card] pot history unavailable",
+            historyResult.reason,
+            statisticsResult.reason,
+          );
+        }
         this.requestUpdate();
-      })
-      .catch((error: unknown) => {
-        console.warn("[irrigation-schedule-card] pot history unavailable", error);
       });
   }
 

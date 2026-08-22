@@ -99,6 +99,11 @@ describe("IrrigationScheduleCard pot sensor grid", () => {
     const callWSMock = vi.fn<(message: Record<string, unknown>) => void>();
     const callWS: NonNullable<HomeAssistant["callWS"]> = async <T>(message: Record<string, unknown>) => {
       callWSMock(message);
+      if (message.type === "recorder/statistics_during_period") {
+        return {
+          "sensor.mesa_1": [{ mean: 31 }, { mean: 47 }, { mean: 35 }],
+        } as T;
+      }
       return {
         "sensor.mesa_1": [{ s: "30" }, { s: "48" }, { s: "35" }],
       } as T;
@@ -118,20 +123,31 @@ describe("IrrigationScheduleCard pot sensor grid", () => {
     document.body.appendChild(card);
     attachedCards.push(card);
     await card.updateComplete;
-    await vi.waitFor(() => expect(callWSMock).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(callWSMock).toHaveBeenCalledTimes(2));
     await card.updateComplete;
 
-    expect(callWSMock.mock.calls[0][0]).toMatchObject({
+    const initialHistoryMessage = callWSMock.mock.calls
+      .map(([message]) => message)
+      .find((message) => message.type === "history/history_during_period");
+    const initialStatisticsMessage = callWSMock.mock.calls
+      .map(([message]) => message)
+      .find((message) => message.type === "recorder/statistics_during_period");
+    expect(initialHistoryMessage).toMatchObject({
       type: "history/history_during_period",
       entity_ids: ["sensor.mesa_1"],
       minimal_response: true,
     });
-    const initialMessage = callWSMock.mock.calls[0][0];
+    expect(initialStatisticsMessage).toMatchObject({
+      type: "recorder/statistics_during_period",
+      statistic_ids: ["sensor.mesa_1"],
+      period: "5minute",
+      types: ["mean"],
+    });
     expect(
-      new Date(initialMessage.end_time as string).getTime() -
-        new Date(initialMessage.start_time as string).getTime(),
+      new Date(initialHistoryMessage?.end_time as string).getTime() -
+        new Date(initialHistoryMessage?.start_time as string).getTime(),
     ).toBe(24 * 60 * 60_000);
-    expect(card.shadowRoot?.querySelector(".pot-sensor-tile path")?.getAttribute("d"))
+    expect(card.shadowRoot?.querySelector(".pot-sensor-line")?.getAttribute("d"))
       .toContain("L");
 
     const period = card.shadowRoot?.querySelector(
@@ -140,13 +156,47 @@ describe("IrrigationScheduleCard pot sensor grid", () => {
     expect(period.value).toBe("24");
     period.value = "6";
     period.dispatchEvent(new Event("change", { bubbles: true }));
-    await vi.waitFor(() => expect(callWSMock).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(callWSMock).toHaveBeenCalledTimes(4));
 
-    const sixHourMessage = callWSMock.mock.calls[1][0];
+    const sixHourMessage = callWSMock.mock.calls
+      .slice(2)
+      .map(([message]) => message)
+      .find((message) => message.type === "history/history_during_period");
     expect(
-      new Date(sixHourMessage.end_time as string).getTime() -
-        new Date(sixHourMessage.start_time as string).getTime(),
+      new Date(sixHourMessage?.end_time as string).getTime() -
+        new Date(sixHourMessage?.start_time as string).getTime(),
     ).toBe(6 * 60 * 60_000);
+  });
+
+  it("falls back to raw history when five-minute statistics are unavailable", async () => {
+    const configured = [{ name: "Mesa 1", entity_id: "sensor.mesa_1" }];
+    const callWS: NonNullable<HomeAssistant["callWS"]> = async <T>(
+      message: Record<string, unknown>,
+    ) => {
+      if (message.type === "recorder/statistics_during_period") {
+        throw new Error("statistics unavailable");
+      }
+      return {
+        "sensor.mesa_1": [{ state: "62" }, { s: "58" }, { s: "54" }],
+      } as T;
+    };
+    const card = makeCard();
+    card.hass = {
+      ...makeHass(
+        {
+          "sensor.jardim_next_run": baseSensor({ pot_sensors: configured }),
+          "sensor.mesa_1": moisture("sensor.mesa_1", "54"),
+        },
+        [],
+      ),
+      callWS,
+    };
+    card.setConfig({ ...VALID_CONFIG });
+    document.body.appendChild(card);
+    attachedCards.push(card);
+    await vi.waitFor(() =>
+      expect(card.shadowRoot?.querySelector(".pot-sensor-line")).not.toBeNull(),
+    );
   });
 
   it("saves names and entities configured through the modern settings section", async () => {
