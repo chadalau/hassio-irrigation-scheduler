@@ -1439,6 +1439,29 @@ export const cardStyles = css`
     gap: 10px;
   }
 
+  /* The name is identity, not a metric: full width above the number grid,
+     with a text input instead of the number+suffix pair. */
+  .settings-name-card {
+    margin-bottom: 8px;
+  }
+
+  .settings-name-card input {
+    min-width: 0;
+    width: 132px;
+    padding: 6px 8px;
+    border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.25));
+    border-radius: 8px;
+    background: rgba(127, 127, 127, 0.06);
+    color: var(--primary-text-color);
+    font-size: 13px;
+    font-family: inherit;
+  }
+
+  .settings-name-card input:focus {
+    outline: none;
+    border-color: var(--scheduler-header-accent);
+  }
+
   .settings-field-card {
     min-height: 98px;
     padding: 12px;

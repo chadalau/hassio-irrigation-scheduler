@@ -8,6 +8,7 @@ import pytest
 from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed_exact,
     async_mock_service,
@@ -19,6 +20,7 @@ from custom_components.irrigation_scheduler.const import (
     CONF_ENABLED,
     CONF_FLOW_RATE_LPH,
     CONF_MAX_DURATION,
+    CONF_NAME,
     CONF_NUMBER_OF_POTS,
     CONF_POT_SENSORS,
     CONF_RESERVOIR_VOLUME_L,
@@ -621,3 +623,55 @@ async def test_set_zone_options_rejects_negative(hass: HomeAssistant, setup_zone
     await hass.async_block_till_done()
 
     assert entry.options.get(CONF_FLOW_RATE_LPH, 0) == 0
+
+
+# ---------------------------------------------------------------------------
+# Renomear a zona pelo card (set_zone_options com "name")
+# ---------------------------------------------------------------------------
+async def test_set_zone_options_renames_zone_everywhere(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """A rename has to land in three places or it only half-applies: the entry
+    data (so a reload rebuilds it), the entry title (what Settings lists) and
+    the device registry (what takes effect without a restart)."""
+    entry = await setup_zone(target_entity_id="switch.zone1", name="Indoor")
+    sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
+    assert sensor_eid
+
+    device_registry = dr.async_get(hass)
+    device = device_registry.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+    assert device is not None
+    assert device.name == "Indoor"
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_SET_ZONE_OPTIONS,
+        {"entity_id": sensor_eid, "name": "  Estufa Norte  "},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    assert entry.data[CONF_NAME] == "Estufa Norte"
+    assert entry.title == "Estufa Norte"
+    device = device_registry.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+    assert device is not None
+    assert device.name == "Estufa Norte"
+    # Entity ids must NOT follow: renaming them would break every dashboard,
+    # automation and card config pointing at this zone.
+    assert entity_id_of(hass, entry, "sensor", "next_run") == sensor_eid
+
+
+async def test_set_zone_options_rejects_an_empty_name(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    entry = await setup_zone(target_entity_id="switch.zone1", name="Indoor")
+    sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
+
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_ZONE_OPTIONS,
+            {"entity_id": sensor_eid, "name": "   "},
+            blocking=True,
+        )
+    assert entry.data[CONF_NAME] == "Indoor"

@@ -8,7 +8,7 @@ export const DOMAIN = "irrigation_scheduler";
  * way to tell from the dashboard which build was actually running. One console
  * line settles that question immediately. Bump it with any visible card change.
  */
-export const CARD_BUILD = "0.13.7";
+export const CARD_BUILD = "0.14.0";
 
 export const DEFAULT_SHOW_NEXT_RUN = true;
 export const DEFAULT_SHOW_WATER_NOW = true;

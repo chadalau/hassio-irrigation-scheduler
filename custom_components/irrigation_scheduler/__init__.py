@@ -37,6 +37,7 @@ from .const import (
     CONF_EC_ENTITY_ID_2,
     CONF_ENABLED,
     CONF_FLOW_RATE_LPH,
+    CONF_NAME,
     CONF_NUMBER_OF_POTS,
     CONF_PH_ENTITY_ID,
     CONF_PH_ENTITY_ID_2,
@@ -166,6 +167,9 @@ REMOVE_SCHEDULE_SCHEMA = vol.Schema(
 
 SET_ZONE_OPTIONS_SCHEMA = vol.Schema(
     {
+        # Identity, not a setting: applied to entry.data/title and the device
+        # registry by async_set_zone_name, not merged into entry.options.
+        vol.Optional(CONF_NAME): vol.All(cv.string, vol.Length(min=1, max=64)),
         vol.Optional(CONF_DEFAULT_DURATION): vol.All(
             vol.Coerce(int), vol.Range(min=MIN_DURATION, max=MAX_SCHEDULE_DURATION)
         ),
@@ -483,6 +487,9 @@ async def _async_register_services(hass: HomeAssistant) -> None:
     async def _async_set_zone_options(call: ServiceCall) -> ServiceResponse:
         data = SET_ZONE_OPTIONS_SCHEMA(_service_data(call))
         for scheduler in await _async_resolve_schedulers(hass, call):
+            name = data.get(CONF_NAME)
+            if name is not None:
+                await scheduler.async_set_zone_name(name)
             await scheduler.async_set_zone_options(
                 default_duration=data.get(CONF_DEFAULT_DURATION),
                 flow_rate_lph=data.get(CONF_FLOW_RATE_LPH),

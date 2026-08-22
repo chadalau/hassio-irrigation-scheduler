@@ -55,6 +55,7 @@ from typing import Any, Callable
 
 from homeassistant.core import CoreState, Event, HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     async_call_later,
@@ -71,6 +72,7 @@ from .const import (
     CONF_ENABLED,
     CONF_FLOW_RATE_LPH,
     CONF_MAX_DURATION,
+    CONF_NAME,
     CONF_NUMBER_OF_POTS,
     CONF_PH_ENTITY_ID,
     CONF_PH_ENTITY_ID_2,
@@ -103,6 +105,7 @@ from .const import (
     DEFAULT_PH_MIN_2,
     DEFAULT_POT_SENSORS,
     DEFAULT_RESERVOIR_VOLUME_L,
+    DOMAIN,
     HISTORY_MAX_ENTRIES,
     HISTORY_RETENTION_DAYS,
     MAX_SCHEDULE_DURATION,
@@ -756,6 +759,48 @@ class IrrigationScheduler:
                         f"on day {day} at {schedule_time}"
                     )
                 occupied[slot] = schedule_id
+
+    async def async_set_zone_name(self, name: str) -> None:
+        """Rename the zone from the card, without reloading the entry.
+
+        The name lives in ``entry.data`` (not options) because it is identity,
+        not a setting: it feeds the device name, and through
+        ``_attr_has_entity_name`` every entity's friendly_name. Three places
+        have to agree or the rename only half-lands:
+
+        - ``entry.data[CONF_NAME]``, so a later reload rebuilds the same name;
+        - the entry TITLE, which is what Settings -> Devices & services lists;
+        - the device registry entry, which is what takes effect RIGHT NOW.
+          Without it the new name would only appear after a restart, since
+          DeviceInfo is only read while entities are being created.
+
+        Entity ids are deliberately left alone. Home Assistant does not rename
+        them when a device is renamed either, and rewriting them would break
+        every dashboard, automation and script that points at this zone --
+        including the card's own ``entity:`` config.
+        """
+        clean = name.strip()
+        if not clean:
+            raise ServiceValidationError("O nome da zona não pode ficar vazio")
+        if len(clean) > 64:
+            raise ServiceValidationError(
+                "O nome da zona deve ter no máximo 64 caracteres"
+            )
+        if clean == self.entry.data.get(CONF_NAME):
+            return
+
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            data={**dict(self.entry.data), CONF_NAME: clean},
+            title=clean,
+        )
+        device_registry = dr.async_get(self.hass)
+        device = device_registry.async_get_device(
+            identifiers={(DOMAIN, self.entry.entry_id)}
+        )
+        if device is not None:
+            device_registry.async_update_device(device.id, name=clean)
+        _LOGGER.info("Zone %s renamed to %r", self.entry.entry_id, clean)
 
     async def async_set_zone_options(
         self,

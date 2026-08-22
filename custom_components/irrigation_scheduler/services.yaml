@@ -170,6 +170,11 @@ set_zone_options:
     entity:
       integration: irrigation_scheduler
   fields:
+    name:
+      name: Zone name
+      description: Rename the zone. Applied to the config entry title and the device name, so every entity's friendly name follows. Entity ids are left untouched.
+      selector:
+        text:
     default_duration:
       name: Default duration
       description: Default watering duration in seconds, used by water_now when no duration is given. Must not exceed the zone's max_duration.

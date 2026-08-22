@@ -1290,6 +1290,51 @@ describe("IrrigationScheduleCard last run + history dialog", () => {
   });
 });
 
+describe("IrrigationScheduleCard zone rename", () => {
+  async function openSettings(calls: ServiceCallRecord[]) {
+    const card = await mountCard(
+      { "sensor.jardim_next_run": baseSensor({ friendly_name: "Indoor next run" }) },
+      calls,
+    );
+    (card as unknown as { _settingsOpen: boolean })._settingsOpen = true;
+    await card.updateComplete;
+    return card;
+  }
+
+  function save(card: IrrigationScheduleCard): void {
+    (card as unknown as { _saveSettings: () => void })._saveSettings();
+  }
+
+  it("sends the new name through set_zone_options", async () => {
+    const calls: ServiceCallRecord[] = [];
+    const card = await openSettings(calls);
+    (card as unknown as { _settingsName: string })._settingsName = "Estufa 2";
+    save(card);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].service).toBe("set_zone_options");
+    expect(calls[0].data.name).toBe("Estufa 2");
+  });
+
+  it("does not send the name when it was not edited", async () => {
+    const calls: ServiceCallRecord[] = [];
+    const card = await openSettings(calls);
+    save(card);
+    // Nothing changed at all -> no service call whatsoever.
+    expect(calls).toHaveLength(0);
+  });
+
+  it("does not send a name identical to the current one", async () => {
+    // Re-typing the same name would churn the config entry and the device
+    // registry for no reason.
+    const calls: ServiceCallRecord[] = [];
+    const card = await openSettings(calls);
+    (card as unknown as { _settingsName: string })._settingsName = "  Indoor  ";
+    save(card);
+    expect(calls).toHaveLength(0);
+  });
+});
+
 describe("IrrigationScheduleCard pot sparkline fallbacks", () => {
   const cfg = [{ name: "Mesa 1", entity_id: "sensor.mesa_1" }];
 

@@ -156,6 +156,16 @@ export class IrrigationScheduleCard extends LitElement {
 
   private _focusBeforeDialog: HTMLElement | null = null;
 
+  /**
+   * Zone name typed in the settings dialog.
+   *
+   * Empty means "not edited": the field shows the configured name and nothing
+   * is sent. Same convention as the numeric fields beside it, so closing the
+   * dialog without touching this never renames anything.
+   */
+  @state()
+  private _settingsName = "";
+
   @state()
   private _settingsDefaultDuration = "";
 
@@ -1331,6 +1341,7 @@ export class IrrigationScheduleCard extends LitElement {
               </div>
               ${this._settingsSection === "general"
                 ? this._renderGeneralSettings(
+                    zoneName,
                     defaultDurationMin,
                     flowRate,
                     numberOfPots,
@@ -1396,6 +1407,7 @@ export class IrrigationScheduleCard extends LitElement {
   }
 
   private _renderGeneralSettings(
+    zoneName: string,
     defaultDurationMin: number,
     flowRate: number,
     numberOfPots: number,
@@ -1412,6 +1424,19 @@ export class IrrigationScheduleCard extends LitElement {
     const perPot = perPotVolumeMl(effectiveFlow, effectiveDuration * 60) ?? 0;
     const total = totalVolumeMl(effectiveFlow, effectiveDuration * 60, effectivePots) ?? 0;
     return html`
+      <label class="settings-field-card field settings-name-card">
+        <span class="settings-field-icon"><ha-icon icon="mdi:rename-outline"></ha-icon></span>
+        <span class="settings-field-copy">
+          <strong>Nome da zona</strong>
+          <small>Renomeia o dispositivo e o título da integração</small>
+        </span>
+        <input
+          type="text"
+          maxlength="64"
+          .value=${this._settingsName || zoneName}
+          @change=${this._onSettingsNameChange}
+        />
+      </label>
       <div class="settings-card-grid field-grid">
         ${this._settingsNumberCard(
           "mdi:timer-outline",
@@ -1672,6 +1697,7 @@ export class IrrigationScheduleCard extends LitElement {
 
   private _closeSettings(): void {
     this._settingsOpen = false;
+    this._settingsName = "";
     this._settingsDefaultDuration = "";
     this._settingsFlow = "";
     this._settingsPots = "";
@@ -1694,6 +1720,11 @@ export class IrrigationScheduleCard extends LitElement {
     this._draggedPotIndex = null;
     this._settingsError = null;
     this._restoreDialogFocus();
+  }
+
+  private _onSettingsNameChange(ev: Event): void {
+    this._settingsName = (ev.target as HTMLInputElement).value;
+    this._settingsError = null;
   }
 
   private _onSettingsDefaultDurationChange(ev: Event): void {
@@ -1817,6 +1848,16 @@ export class IrrigationScheduleCard extends LitElement {
     const pots = Number.parseInt(this._settingsPots, 10);
     const reservoir = Number.parseInt(this._settingsReservoir, 10);
     const data: Record<string, unknown> = {};
+    // Only sent when actually edited AND different: the backend rejects an
+    // empty name, and re-sending the current one would churn the config entry
+    // and the device registry for nothing.
+    const typedName = this._settingsName.trim();
+    const currentName = this._sensorEntity
+      ? this._zoneName(this._sensorEntity)
+      : "";
+    if (typedName && typedName !== currentName) {
+      data.name = typedName;
+    }
     if (Number.isFinite(defaultDurationMin) && defaultDurationMin >= 1) {
       data.default_duration = defaultDurationMin * 60;
     }
