@@ -16,6 +16,9 @@ CONF_MAX_DURATION = "max_duration"
 CONF_FLOW_RATE_LPH = "flow_rate_lph"
 CONF_NUMBER_OF_POTS = "number_of_pots"
 CONF_RESERVOIR_VOLUME_L = "reservoir_volume_l"
+CONF_POT_SENSORS = "pot_sensors"
+CONF_POT_SENSOR_NAME = "name"
+CONF_POT_SENSOR_ENTITY_ID = "entity_id"
 CONF_PH_ENTITY_ID = "ph_entity_id"
 CONF_PH_MIN = "ph_min"
 CONF_PH_MAX = "ph_max"
@@ -54,6 +57,7 @@ DEFAULT_MAX_DURATION = 7200
 DEFAULT_FLOW_RATE_LPH = 0
 DEFAULT_NUMBER_OF_POTS = 0
 DEFAULT_RESERVOIR_VOLUME_L = 0
+DEFAULT_POT_SENSORS: list[dict[str, str]] = []
 # Empty string means "no pH sensor configured" -> the pH gate is disabled and
 # scheduled runs behave exactly as before this feature existed.
 DEFAULT_PH_ENTITY_ID = ""

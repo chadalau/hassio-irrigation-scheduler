@@ -45,8 +45,16 @@ import type {
   HassEntity,
   HistoryRun,
   HomeAssistant,
+  PotSensorConfig,
   Schedule,
 } from "./types";
+
+type SettingsSection = "general" | "reservoir1" | "reservoir2" | "potSensors";
+
+interface HistoryState {
+  s?: string;
+  state?: string;
+}
 
 /** Minimal shape for elements exposing a `checked` property. */
 interface CheckableElement extends HTMLElement {
@@ -91,6 +99,23 @@ export class IrrigationScheduleCard extends LitElement {
 
   @state()
   private _settingsOpen = false;
+
+  @state()
+  private _settingsSection: SettingsSection = "general";
+
+  @state()
+  private _settingsPotSensors: PotSensorConfig[] = [];
+
+  private _settingsPotSensorsTouched = false;
+
+  @state()
+  private _potSensorHistory = new Map<string, number[]>();
+
+  private _potHistoryKey = "";
+  private _potHistoryLoadedAt = 0;
+  private _potHistoryRequestId = 0;
+
+  private _draggedPotIndex: number | null = null;
 
   private _focusBeforeDialog: HTMLElement | null = null;
 
@@ -224,6 +249,9 @@ export class IrrigationScheduleCard extends LitElement {
     } else if (this._tickerId !== null) {
       this._stopTicker();
     }
+    if (changed.has("hass") || changed.has("_config")) {
+      this._loadPotSensorHistory();
+    }
   }
 
   protected render(): TemplateResult {
@@ -308,6 +336,7 @@ export class IrrigationScheduleCard extends LitElement {
     const defaultDurationSec = this._numberAttr(sensor, "default_duration") ?? 600;
     const flowRate = this._numberAttr(sensor, "flow_rate_lph") ?? 0;
     const numberOfPots = this._numberAttr(sensor, "number_of_pots") ?? 0;
+    const potSensors = this._potSensorsAttr(sensor);
     const reservoirVolume = this._numberAttr(sensor, "reservoir_volume_l") ?? 0;
     const reservoirRemaining =
       this._numberAttr(sensor, "reservoir_remaining_l") ?? reservoirVolume;
@@ -588,6 +617,8 @@ export class IrrigationScheduleCard extends LitElement {
             `
           : ""}
 
+        ${this._renderPotSensors(potSensors)}
+
         <div class="section-divider"></div>
 
         <div class="card-body">
@@ -849,6 +880,147 @@ export class IrrigationScheduleCard extends LitElement {
     `;
   }
 
+  private _renderPotSensors(sensors: PotSensorConfig[]): TemplateResult {
+    if (sensors.length === 0) {
+      return html``;
+    }
+    return html`
+      <div class="section-divider"></div>
+      <section class="card-body pot-sensors-section" aria-label="Sensores dos vasos">
+        <div class="pot-sensors-heading">
+          <h3 class="section-title">Sensores dos vasos</h3>
+          <span>24 h</span>
+        </div>
+        <div class="pot-sensors-grid">
+          ${sensors.map((sensor) => this._renderPotSensor(sensor))}
+        </div>
+      </section>
+    `;
+  }
+
+  private _renderPotSensor(config: PotSensorConfig): TemplateResult {
+    const entity = this.hass?.states[config.entity_id];
+    const value = entity ? Number.parseFloat(entity.state) : Number.NaN;
+    const unit =
+      typeof entity?.attributes.unit_of_measurement === "string"
+        ? entity.attributes.unit_of_measurement
+        : "%";
+    const history = this._potSensorHistory.get(config.entity_id) ?? [];
+    const points = Number.isFinite(value) ? [...history, value] : history;
+    const path = this._sparklinePath(points);
+    return html`
+      <button
+        type="button"
+        class="pot-sensor-tile"
+        title=${`Abrir ${config.name}`}
+        @click=${() => this._openMoreInfo(config.entity_id)}
+      >
+        <span class="pot-sensor-copy">
+          <ha-icon icon="mdi:water-percent"></ha-icon>
+          <span>
+            <small>${config.name}</small>
+            <strong>${Number.isFinite(value) ? `${Math.round(value)}${unit}` : "—"}</strong>
+          </span>
+        </span>
+        <svg viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">
+          ${path ? html`<path d=${path}></path>` : ""}
+        </svg>
+      </button>
+    `;
+  }
+
+  private _sparklinePath(values: number[]): string {
+    const finite = values.filter(Number.isFinite).slice(-96);
+    if (finite.length === 0) {
+      return "";
+    }
+    const min = Math.min(...finite);
+    const max = Math.max(...finite);
+    const range = Math.max(1, max - min);
+    return finite
+      .map((value, index) => {
+        const x = finite.length === 1 ? 100 : (index / (finite.length - 1)) * 100;
+        const y = 25 - ((value - min) / range) * 22;
+        return `${index === 0 ? "M" : "L"}${x.toFixed(2)} ${y.toFixed(2)}`;
+      })
+      .join(" ");
+  }
+
+  private _potSensorsAttr(entity: HassEntity | undefined): PotSensorConfig[] {
+    const value = entity?.attributes.pot_sensors;
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    const seen = new Set<string>();
+    return value.flatMap((item) => {
+      if (!item || typeof item !== "object") {
+        return [];
+      }
+      const record = item as Record<string, unknown>;
+      if (
+        typeof record.name !== "string" ||
+        !record.name.trim() ||
+        typeof record.entity_id !== "string" ||
+        !record.entity_id.startsWith("sensor.") ||
+        seen.has(record.entity_id)
+      ) {
+        return [];
+      }
+      seen.add(record.entity_id);
+      return [{ name: record.name.trim(), entity_id: record.entity_id }];
+    });
+  }
+
+  private _loadPotSensorHistory(): void {
+    const sensors = this._potSensorsAttr(this._sensorEntity);
+    const ids = sensors.map((sensor) => sensor.entity_id);
+    const key = ids.join("|");
+    if (key !== this._potHistoryKey) {
+      this._potHistoryKey = key;
+      this._potHistoryLoadedAt = 0;
+      this._potSensorHistory = new Map();
+    }
+    if (
+      ids.length === 0 ||
+      !this.hass?.callWS ||
+      Date.now() - this._potHistoryLoadedAt < 5 * 60_000
+    ) {
+      return;
+    }
+    this._potHistoryLoadedAt = Date.now();
+    const requestId = ++this._potHistoryRequestId;
+    const end = new Date();
+    const start = new Date(end.getTime() - 24 * 60 * 60_000);
+    void this.hass
+      .callWS<Record<string, HistoryState[]>>({
+        type: "history/history_during_period",
+        start_time: start.toISOString(),
+        end_time: end.toISOString(),
+        entity_ids: ids,
+        minimal_response: true,
+        no_attributes: true,
+        significant_changes_only: false,
+      })
+      .then((response) => {
+        if (requestId !== this._potHistoryRequestId || key !== this._potHistoryKey) {
+          return;
+        }
+        const next = new Map<string, number[]>();
+        for (const id of ids) {
+          const states = Array.isArray(response?.[id]) ? response[id] : [];
+          const values = states
+            .map((state) => Number.parseFloat(state.s ?? state.state ?? ""))
+            .filter(Number.isFinite);
+          next.set(id, values);
+        }
+        this._potSensorHistory = next;
+        this.requestUpdate();
+      })
+      .catch((error: unknown) => {
+        console.warn("[irrigation-schedule-card] pot history unavailable", error);
+      });
+  }
+
   private _renderSettings(
     zoneName: string,
     defaultDurationSec: number,
@@ -868,6 +1040,19 @@ export class IrrigationScheduleCard extends LitElement {
       return html``;
     }
     const defaultDurationMin = Math.max(1, Math.round(defaultDurationSec / 60));
+    const sensorIds = this._sensorEntityIds();
+    const sectionTitle = {
+      general: "Configurações gerais",
+      reservoir1: "Reservatório 1",
+      reservoir2: "Reservatório 2",
+      potSensors: "Sensores dos vasos",
+    }[this._settingsSection];
+    const sectionSubtitle = {
+      general: "Parâmetros usados nos cálculos de volume e duração.",
+      reservoir1: "Sensores e faixa segura do reservatório principal.",
+      reservoir2: "Segundo reservatório opcional e independente.",
+      potSensors: "Organize os sensores que aparecem no resumo de 24 horas.",
+    }[this._settingsSection];
     return html`
       <div class="overlay" @click=${this._closeSettings}>
         <div
@@ -879,13 +1064,15 @@ export class IrrigationScheduleCard extends LitElement {
           @keydown=${this._onDialogKeydown}
           @click=${(ev: Event) => ev.stopPropagation()}
         >
-          <div class="dialog-header">
+          <div class="settings-header">
+            <div class="settings-header-icon"><ha-icon icon="mdi:water-outline"></ha-icon></div>
             <div>
-              <small>Configurações</small>
-              <h3 id="irrigation-settings-title">${zoneName}</h3>
+              <small>IRRIGAÇÃO</small>
+              <h3 id="irrigation-settings-title">Configurar ${zoneName}</h3>
+              <p>Ajuste os parâmetros da zona e os sensores exibidos no card.</p>
             </div>
             <button
-              class="icon-button"
+              class="settings-close icon-button"
               type="button"
               title="Fechar"
               aria-label="Fechar"
@@ -894,167 +1081,305 @@ export class IrrigationScheduleCard extends LitElement {
               <ha-icon icon="mdi:close"></ha-icon>
             </button>
           </div>
-          <div class="dialog-body">
-            <div class="field-grid">
-              <div class="field">
-                <label>Duração padrão da rega (min)</label>
-                <input
-                  type="number"
-                  min="1"
-                  .value=${this._settingsDefaultDuration || String(defaultDurationMin)}
-                  @change=${this._onSettingsDefaultDurationChange}
-                />
+          <div class="settings-layout">
+            <nav class="settings-nav" aria-label="Seções das configurações">
+              ${this._settingsNavButton("general", "mdi:tune-variant", "Geral")}
+              ${this._settingsNavButton("reservoir1", "mdi:cup-water", "Reservatório 1")}
+              ${this._settingsNavButton("reservoir2", "mdi:cup-water", "Reservatório 2", true)}
+              ${this._settingsNavButton("potSensors", "mdi:water-percent", "Sensores dos vasos")}
+            </nav>
+            <div class="settings-content">
+              <div class="settings-section-heading">
+                <h4>${sectionTitle}</h4>
+                <p>${sectionSubtitle}</p>
               </div>
-              <div class="field">
-                <label>Vazão por vaso (L/h)</label>
-                <input
-                  type="number"
-                  min="0"
-                  .value=${this._settingsFlow || String(flowRate)}
-                  @change=${this._onSettingsFlowChange}
-                />
-              </div>
-              <div class="field">
-                <label>Número de vasos</label>
-                <input
-                  type="number"
-                  min="0"
-                  .value=${this._settingsPots || String(numberOfPots)}
-                  @change=${this._onSettingsPotsChange}
-                />
-              </div>
-              <div class="field">
-                <label>Volume do reservatório (L)</label>
-                <input
-                  type="number"
-                  min="0"
-                  .value=${this._settingsReservoir || String(reservoirVolume)}
-                  @change=${this._onSettingsReservoirChange}
-                />
-              </div>
+              ${this._settingsSection === "general"
+                ? this._renderGeneralSettings(
+                    defaultDurationMin,
+                    flowRate,
+                    numberOfPots,
+                    reservoirVolume,
+                  )
+                : this._settingsSection === "reservoir1"
+                  ? this._renderReservoirSettings(
+                      1,
+                      phEntityId,
+                      phMin,
+                      phMax,
+                      ecEntityId,
+                      sensorIds,
+                    )
+                  : this._settingsSection === "reservoir2"
+                    ? this._renderReservoirSettings(
+                        2,
+                        phEntityId2,
+                        phMin2,
+                        phMax2,
+                        ecEntityId2,
+                        sensorIds,
+                      )
+                    : this._renderPotSensorSettings(sensorIds)}
+              ${this._settingsError
+                ? html`<div class="form-error">${this._settingsError}</div>`
+                : ""}
             </div>
-
-            <div class="dialog-divider"></div>
-            <h4 class="section-title">Reservatório 1</h4>
-            <div class="field">
-              <label>Sensor de pH (opcional)</label>
-              <input
-                type="text"
-                list="ph-sensor-options"
-                placeholder="sensor.reservatorio_ph"
-                .value=${this._settingsPhEntityTouched ? this._settingsPhEntity : phEntityId}
-                @change=${this._onSettingsPhEntityChange}
-              />
-              <datalist id="ph-sensor-options">
-                ${this._sensorEntityIds().map((id) => html`<option value=${id}></option>`)}
-              </datalist>
-            </div>
-            <div class="field">
-              <label>Faixa de pH pra regar (agendado)</label>
-              <div class="duration-row">
-                <div class="duration-part">
-                  <input
-                    type="number"
-                    min="0"
-                    max="14"
-                    step="0.1"
-                    .value=${this._settingsPhMin || String(phMin)}
-                    @change=${this._onSettingsPhMinChange}
-                  />
-                </div>
-                <div class="duration-part">
-                  <input
-                    type="number"
-                    min="0"
-                    max="14"
-                    step="0.1"
-                    .value=${this._settingsPhMax || String(phMax)}
-                    @change=${this._onSettingsPhMaxChange}
-                  />
-                </div>
-              </div>
-            </div>
-            <div class="field">
-              <label>Sensor de EC (opcional, só exibição)</label>
-              <input
-                type="text"
-                list="ec-sensor-options"
-                placeholder="sensor.reservatorio_ec"
-                .value=${this._settingsEcEntityTouched ? this._settingsEcEntity : ecEntityId}
-                @change=${this._onSettingsEcEntityChange}
-              />
-              <datalist id="ec-sensor-options">
-                ${this._sensorEntityIds().map((id) => html`<option value=${id}></option>`)}
-              </datalist>
-            </div>
-
-            <div class="dialog-divider"></div>
-            <h4 class="section-title">Reservatório 2 (opcional)</h4>
-            <div class="field">
-              <label>Sensor de pH (opcional)</label>
-              <input
-                type="text"
-                list="ph-sensor-options-2"
-                placeholder="sensor.reservatorio2_ph"
-                .value=${this._settingsPhEntity2Touched ? this._settingsPhEntity2 : phEntityId2}
-                @change=${this._onSettingsPhEntity2Change}
-              />
-              <datalist id="ph-sensor-options-2">
-                ${this._sensorEntityIds().map((id) => html`<option value=${id}></option>`)}
-              </datalist>
-            </div>
-            <div class="field">
-              <label>Faixa de pH pra regar (agendado)</label>
-              <div class="duration-row">
-                <div class="duration-part">
-                  <input
-                    type="number"
-                    min="0"
-                    max="14"
-                    step="0.1"
-                    .value=${this._settingsPhMin2 || String(phMin2)}
-                    @change=${this._onSettingsPhMin2Change}
-                  />
-                </div>
-                <div class="duration-part">
-                  <input
-                    type="number"
-                    min="0"
-                    max="14"
-                    step="0.1"
-                    .value=${this._settingsPhMax2 || String(phMax2)}
-                    @change=${this._onSettingsPhMax2Change}
-                  />
-                </div>
-              </div>
-            </div>
-            <div class="field">
-              <label>Sensor de EC (opcional, só exibição)</label>
-              <input
-                type="text"
-                list="ec-sensor-options-2"
-                placeholder="sensor.reservatorio2_ec"
-                .value=${this._settingsEcEntity2Touched ? this._settingsEcEntity2 : ecEntityId2}
-                @change=${this._onSettingsEcEntity2Change}
-              />
-              <datalist id="ec-sensor-options-2">
-                ${this._sensorEntityIds().map((id) => html`<option value=${id}></option>`)}
-              </datalist>
-            </div>
-
-            ${this._settingsError
-              ? html`<div class="form-error">${this._settingsError}</div>`
-              : ""}
           </div>
-          <div class="dialog-actions">
-            <button type="button" class="dialog-cancel" @click=${this._closeSettings}>
-              Fechar
+          <div class="dialog-actions settings-actions">
+            <span>${this._settingsDirty() ? "Alterações não salvas" : "Tudo atualizado"}</span>
+            <button type="button" class="dialog-cancel" @click=${this._closeSettings}>Cancelar</button>
+            <button type="button" class="dialog-save" @click=${this._saveSettings}>
+              <ha-icon icon="mdi:content-save-outline"></ha-icon> Salvar alterações
             </button>
-            <button type="button" class="dialog-save" @click=${this._saveSettings}>Salvar</button>
           </div>
         </div>
       </div>
     `;
+  }
+
+  private _settingsNavButton(
+    section: SettingsSection,
+    icon: string,
+    label: string,
+    optional = false,
+  ): TemplateResult {
+    return html`
+      <button
+        type="button"
+        class=${this._settingsSection === section ? "active" : ""}
+        aria-current=${this._settingsSection === section ? "page" : "false"}
+        @click=${() => {
+          this._settingsSection = section;
+          this._settingsError = null;
+        }}
+      >
+        <ha-icon icon=${icon}></ha-icon>
+        <span>${label}${optional ? html`<small>Opcional</small>` : ""}</span>
+        <ha-icon class="nav-chevron" icon="mdi:chevron-right"></ha-icon>
+      </button>
+    `;
+  }
+
+  private _renderGeneralSettings(
+    defaultDurationMin: number,
+    flowRate: number,
+    numberOfPots: number,
+    reservoirVolume: number,
+  ): TemplateResult {
+    const effectiveDuration =
+      Number.parseInt(this._settingsDefaultDuration, 10) || defaultDurationMin;
+    const effectiveFlow = Number.isFinite(Number.parseInt(this._settingsFlow, 10))
+      ? Number.parseInt(this._settingsFlow, 10)
+      : flowRate;
+    const effectivePots = Number.isFinite(Number.parseInt(this._settingsPots, 10))
+      ? Number.parseInt(this._settingsPots, 10)
+      : numberOfPots;
+    const perPot = perPotVolumeMl(effectiveFlow, effectiveDuration * 60) ?? 0;
+    const total = totalVolumeMl(effectiveFlow, effectiveDuration * 60, effectivePots) ?? 0;
+    return html`
+      <div class="settings-card-grid field-grid">
+        ${this._settingsNumberCard(
+          "mdi:timer-outline",
+          "Duração padrão",
+          "Tempo sugerido ao criar um horário",
+          this._settingsDefaultDuration || String(defaultDurationMin),
+          "min",
+          1,
+          this._onSettingsDefaultDurationChange,
+        )}
+        ${this._settingsNumberCard(
+          "mdi:water-pump",
+          "Vazão por vaso",
+          "Litros entregues por hora em cada vaso",
+          this._settingsFlow || String(flowRate),
+          "L/h",
+          0,
+          this._onSettingsFlowChange,
+        )}
+        ${this._settingsNumberCard(
+          "mdi:sprout-outline",
+          "Número de vasos",
+          "Total atendido por esta zona",
+          this._settingsPots || String(numberOfPots),
+          "vasos",
+          0,
+          this._onSettingsPotsChange,
+        )}
+        ${this._settingsNumberCard(
+          "mdi:cup-water",
+          "Volume do reservatório",
+          "Capacidade usada na estimativa do card",
+          this._settingsReservoir || String(reservoirVolume),
+          "L",
+          0,
+          this._onSettingsReservoirChange,
+        )}
+      </div>
+      <div class="settings-estimate">
+        <ha-icon icon="mdi:calculator-variant-outline"></ha-icon>
+        <div><span>Estimativa por rega</span><strong>${formatMl(perPot)} por vaso</strong></div>
+        <div><span>Volume total</span><strong>${formatVolume(total / 1000)}</strong></div>
+      </div>
+    `;
+  }
+
+  private _settingsNumberCard(
+    icon: string,
+    label: string,
+    hint: string,
+    value: string,
+    suffix: string,
+    min: number,
+    handler: (ev: Event) => void,
+  ): TemplateResult {
+    return html`
+      <label class="settings-field-card field">
+        <span class="settings-field-icon"><ha-icon icon=${icon}></ha-icon></span>
+        <span class="settings-field-copy"><strong>${label}</strong><small>${hint}</small></span>
+        <span class="settings-input-suffix">
+          <input type="number" min=${min} .value=${value} @change=${handler} />
+          <span>${suffix}</span>
+        </span>
+      </label>
+    `;
+  }
+
+  private _renderReservoirSettings(
+    reservoir: 1 | 2,
+    phEntityId: string,
+    phMin: number,
+    phMax: number,
+    ecEntityId: string,
+    sensorIds: string[],
+  ): TemplateResult {
+    const second = reservoir === 2;
+    const phValue = this._settingsPhValue(second, phEntityId);
+    const ecValue = this._settingsEcValue(second, ecEntityId);
+    const phInput = second
+      ? this._settingsPhEntityTouchedValue(2, phEntityId)
+      : this._settingsPhEntityTouchedValue(1, phEntityId);
+    const ecInput = second
+      ? this._settingsEcEntityTouchedValue(2, ecEntityId)
+      : this._settingsEcEntityTouchedValue(1, ecEntityId);
+    return html`
+      ${second
+        ? html`<div class="settings-notice"><ha-icon icon="mdi:information-outline"></ha-icon><span>Use esta seção apenas quando a zona recebe água de um segundo reservatório.</span></div>`
+        : ""}
+      <div class="reservoir-live-grid">
+        <div><ha-icon icon="mdi:flask-outline"></ha-icon><span>pH atual</span><strong>${phValue}</strong></div>
+        <div><ha-icon icon="mdi:flash-outline"></ha-icon><span>EC atual</span><strong>${ecValue}</strong></div>
+      </div>
+      <div class="settings-form-card">
+        <label class="field">
+          <span>Sensor de pH</span>
+          <input
+            type="text"
+            list=${second ? "ph-sensor-options-2" : "ph-sensor-options"}
+            placeholder="sensor.reservatorio_ph"
+            .value=${phInput}
+            @change=${second ? this._onSettingsPhEntity2Change : this._onSettingsPhEntityChange}
+          />
+        </label>
+        <datalist id=${second ? "ph-sensor-options-2" : "ph-sensor-options"}>
+          ${sensorIds.map((id) => html`<option value=${id}></option>`)}
+        </datalist>
+        <div class="field">
+          <span>Faixa de pH para rega agendada</span>
+          <div class="duration-row">
+            <label class="duration-part"><small>Mínimo</small><input type="number" min="0" max="14" step="0.1" .value=${second ? this._settingsPhMin2 || String(phMin) : this._settingsPhMin || String(phMin)} @change=${second ? this._onSettingsPhMin2Change : this._onSettingsPhMinChange} /></label>
+            <span class="range-separator">até</span>
+            <label class="duration-part"><small>Máximo</small><input type="number" min="0" max="14" step="0.1" .value=${second ? this._settingsPhMax2 || String(phMax) : this._settingsPhMax || String(phMax)} @change=${second ? this._onSettingsPhMax2Change : this._onSettingsPhMaxChange} /></label>
+          </div>
+        </div>
+        <label class="field">
+          <span>Sensor de EC <small>Somente exibição</small></span>
+          <input type="text" list=${second ? "ec-sensor-options-2" : "ec-sensor-options"} placeholder="sensor.reservatorio_ec" .value=${ecInput} @change=${second ? this._onSettingsEcEntity2Change : this._onSettingsEcEntityChange} />
+        </label>
+        <datalist id=${second ? "ec-sensor-options-2" : "ec-sensor-options"}>
+          ${sensorIds.map((id) => html`<option value=${id}></option>`)}
+        </datalist>
+      </div>
+    `;
+  }
+
+  private _settingsPhEntityTouchedValue(reservoir: 1 | 2, fallback: string): string {
+    return reservoir === 1
+      ? this._settingsPhEntityTouched
+        ? this._settingsPhEntity
+        : fallback
+      : this._settingsPhEntity2Touched
+        ? this._settingsPhEntity2
+        : fallback;
+  }
+
+  private _settingsEcEntityTouchedValue(reservoir: 1 | 2, fallback: string): string {
+    return reservoir === 1
+      ? this._settingsEcEntityTouched
+        ? this._settingsEcEntity
+        : fallback
+      : this._settingsEcEntity2Touched
+        ? this._settingsEcEntity2
+        : fallback;
+  }
+
+  private _settingsPhValue(second: boolean, entityId: string): string {
+    const configured = second
+      ? this._settingsPhEntityTouchedValue(2, entityId)
+      : this._settingsPhEntityTouchedValue(1, entityId);
+    return configured
+      ? this._sensorBadgeText(configured, "—", (value) => value.toFixed(2))
+      : "—";
+  }
+
+  private _settingsEcValue(second: boolean, entityId: string): string {
+    const configured = second
+      ? this._settingsEcEntityTouchedValue(2, entityId)
+      : this._settingsEcEntityTouchedValue(1, entityId);
+    return configured
+      ? this._sensorBadgeText(configured, "—", (value, unit) => `${value} ${unit ?? ""}`.trim())
+      : "—";
+  }
+
+  private _renderPotSensorSettings(sensorIds: string[]): TemplateResult {
+    const used = new Set(this._settingsPotSensors.map((sensor) => sensor.entity_id));
+    return html`
+      <div class="pot-settings-toolbar">
+        <span>${this._settingsPotSensors.length} sensores configurados</span>
+        <button type="button" @click=${this._addPotSensor}><ha-icon icon="mdi:plus"></ha-icon>Adicionar sensor</button>
+      </div>
+      <div class="pot-settings-list">
+        ${this._settingsPotSensors.length === 0
+          ? html`<div class="pot-settings-empty"><ha-icon icon="mdi:water-percent"></ha-icon><strong>Nenhum sensor configurado</strong><span>Adicione os sensores de amostragem das fileiras ou mesas.</span></div>`
+          : this._settingsPotSensors.map(
+              (sensor, index) => html`
+                <div class="pot-settings-row" draggable="true" @dragstart=${(ev: DragEvent) => this._startPotDrag(index, ev)} @dragover=${(ev: DragEvent) => ev.preventDefault()} @drop=${() => this._dropPotSensor(index)}>
+                  <ha-icon class="drag-handle" icon="mdi:drag-vertical"></ha-icon>
+                  <span class="pot-order">${index + 1}</span>
+                  <label><span>Nome exibido</span><input type="text" maxlength="64" .value=${sensor.name} @input=${(ev: Event) => this._updatePotSensor(index, "name", (ev.target as HTMLInputElement).value)} /></label>
+                  <label><span>Entidade</span><select @change=${(ev: Event) => this._updatePotSensor(index, "entity_id", (ev.target as HTMLSelectElement).value)}><option value="" ?selected=${!sensor.entity_id}>Selecione um sensor</option>${sensor.entity_id && !sensorIds.includes(sensor.entity_id) ? html`<option value=${sensor.entity_id} selected>${sensor.entity_id}</option>` : ""}${sensorIds.map((id) => html`<option value=${id} ?selected=${id === sensor.entity_id} ?disabled=${used.has(id) && id !== sensor.entity_id}>${id}</option>`)}</select></label>
+                  <div class="pot-row-actions"><button type="button" title="Mover para cima" ?disabled=${index === 0} @click=${() => this._movePotSensor(index, index - 1)}><ha-icon icon="mdi:chevron-up"></ha-icon></button><button type="button" title="Mover para baixo" ?disabled=${index === this._settingsPotSensors.length - 1} @click=${() => this._movePotSensor(index, index + 1)}><ha-icon icon="mdi:chevron-down"></ha-icon></button><button type="button" class="remove" title="Remover sensor" @click=${() => this._removePotSensor(index)}><ha-icon icon="mdi:trash-can-outline"></ha-icon></button></div>
+                </div>
+              `,
+            )}
+      </div>
+    `;
+  }
+
+  private _settingsDirty(): boolean {
+    return Boolean(
+      this._settingsDefaultDuration ||
+        this._settingsFlow ||
+        this._settingsPots ||
+        this._settingsReservoir ||
+        this._settingsPhEntityTouched ||
+        this._settingsPhMin ||
+        this._settingsPhMax ||
+        this._settingsEcEntityTouched ||
+        this._settingsPhEntity2Touched ||
+        this._settingsPhMin2 ||
+        this._settingsPhMax2 ||
+        this._settingsEcEntity2Touched ||
+        this._settingsPotSensorsTouched,
+    );
   }
 
   private _openSettings(): void {
@@ -1066,6 +1391,11 @@ export class IrrigationScheduleCard extends LitElement {
       this._closeSettings();
     } else {
       this._rememberDialogFocus();
+      this._settingsSection = "general";
+      this._settingsPotSensors = this._potSensorsAttr(this._sensorEntity).map((item) => ({
+        ...item,
+      }));
+      this._settingsPotSensorsTouched = false;
       this._settingsOpen = true;
       this._focusOpenDialog();
     }
@@ -1100,6 +1430,10 @@ export class IrrigationScheduleCard extends LitElement {
     this._settingsPhMax2 = "";
     this._settingsEcEntity2 = "";
     this._settingsEcEntity2Touched = false;
+    this._settingsSection = "general";
+    this._settingsPotSensors = [];
+    this._settingsPotSensorsTouched = false;
+    this._draggedPotIndex = null;
     this._settingsError = null;
     this._restoreDialogFocus();
   }
@@ -1162,6 +1496,61 @@ export class IrrigationScheduleCard extends LitElement {
     this._settingsEcEntity2 = (ev.target as HTMLInputElement).value.trim();
     this._settingsEcEntity2Touched = true;
     this._settingsError = null;
+  }
+
+  private _addPotSensor(): void {
+    this._settingsPotSensors = [
+      ...this._settingsPotSensors,
+      { name: `Fileira ${this._settingsPotSensors.length + 1}`, entity_id: "" },
+    ];
+    this._settingsPotSensorsTouched = true;
+    this._settingsError = null;
+  }
+
+  private _updatePotSensor(
+    index: number,
+    field: keyof PotSensorConfig,
+    value: string,
+  ): void {
+    this._settingsPotSensors = this._settingsPotSensors.map((item, itemIndex) =>
+      itemIndex === index ? { ...item, [field]: value } : item,
+    );
+    this._settingsPotSensorsTouched = true;
+    this._settingsError = null;
+  }
+
+  private _removePotSensor(index: number): void {
+    this._settingsPotSensors = this._settingsPotSensors.filter(
+      (_item, itemIndex) => itemIndex !== index,
+    );
+    this._settingsPotSensorsTouched = true;
+    this._settingsError = null;
+  }
+
+  private _movePotSensor(from: number, to: number): void {
+    if (from < 0 || to < 0 || from >= this._settingsPotSensors.length || to >= this._settingsPotSensors.length || from === to) {
+      return;
+    }
+    const next = [...this._settingsPotSensors];
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    this._settingsPotSensors = next;
+    this._settingsPotSensorsTouched = true;
+  }
+
+  private _startPotDrag(index: number, ev: DragEvent): void {
+    this._draggedPotIndex = index;
+    ev.dataTransfer?.setData("text/plain", String(index));
+    if (ev.dataTransfer) {
+      ev.dataTransfer.effectAllowed = "move";
+    }
+  }
+
+  private _dropPotSensor(index: number): void {
+    if (this._draggedPotIndex !== null) {
+      this._movePotSensor(this._draggedPotIndex, index);
+    }
+    this._draggedPotIndex = null;
   }
 
   private _saveSettings(): void {
@@ -1240,6 +1629,24 @@ export class IrrigationScheduleCard extends LitElement {
     }
     if (this._settingsEcEntity2Touched) {
       data.ec_entity_id_2 = this._settingsEcEntity2;
+    }
+    if (this._settingsPotSensorsTouched) {
+      const normalized = this._settingsPotSensors.map((item) => ({
+        name: item.name.trim(),
+        entity_id: item.entity_id.trim(),
+      }));
+      if (normalized.some((item) => !item.name || !item.entity_id)) {
+        this._settingsSection = "potSensors";
+        this._settingsError = "Preencha o nome e a entidade de todos os sensores.";
+        return;
+      }
+      const ids = normalized.map((item) => item.entity_id);
+      if (new Set(ids).size !== ids.length) {
+        this._settingsSection = "potSensors";
+        this._settingsError = "Cada entidade pode ser usada apenas uma vez.";
+        return;
+      }
+      data.pot_sensors = normalized;
     }
 
     if (Object.keys(data).length === 0) {

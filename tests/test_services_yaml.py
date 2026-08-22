@@ -19,6 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import voluptuous as vol
 
 yaml = pytest.importorskip("yaml")
 ha_service = pytest.importorskip("homeassistant.helpers.service")
@@ -83,3 +84,21 @@ def test_set_zone_options_documents_every_accepted_field() -> None:
     accepted = {str(key) for key in integration.SET_ZONE_OPTIONS_SCHEMA.schema}
     documented = set(_load()["set_zone_options"]["fields"])
     assert accepted == documented
+
+
+@pytest.mark.parametrize(
+    "pot_sensors",
+    [
+        [{"name": "", "entity_id": "sensor.row_1"}],
+        [{"name": "Row 1", "entity_id": "binary_sensor.row_1"}],
+        [
+            {"name": "Row 1", "entity_id": "sensor.same"},
+            {"name": "Row 2", "entity_id": "sensor.same"},
+        ],
+    ],
+)
+def test_set_zone_options_rejects_invalid_pot_sensors(pot_sensors: list[dict]) -> None:
+    """Pot sensor entries must be complete, numeric-sensor entities, and unique."""
+    integration = _integration()
+    with pytest.raises(vol.Invalid):
+        integration.SET_ZONE_OPTIONS_SCHEMA({"pot_sensors": pot_sensors})

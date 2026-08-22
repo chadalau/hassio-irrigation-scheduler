@@ -20,6 +20,7 @@ from custom_components.irrigation_scheduler.const import (
     CONF_FLOW_RATE_LPH,
     CONF_MAX_DURATION,
     CONF_NUMBER_OF_POTS,
+    CONF_POT_SENSORS,
     CONF_RESERVOIR_VOLUME_L,
     CONF_SCHEDULES,
     DOMAIN,
@@ -498,6 +499,33 @@ async def test_set_zone_options_updates_flow_rate_and_pots(hass: HomeAssistant, 
     assert state.attributes[CONF_FLOW_RATE_LPH] == 300
     assert state.attributes[CONF_NUMBER_OF_POTS] == 12
     assert state.attributes[CONF_RESERVOIR_VOLUME_L] == 1000
+
+
+async def test_set_zone_options_persists_ordered_pot_sensors(
+    hass: HomeAssistant, setup_zone
+) -> None:
+    """The compact sensor grid is configured once and exposed by the card contract."""
+    entry = await setup_zone(target_entity_id="switch.zone1", name="Garden")
+    sensor_eid = entity_id_of(hass, entry, "sensor", "next_run")
+    assert sensor_eid
+    configured = [
+        {"name": "Fileira 1", "entity_id": "sensor.fileira_1"},
+        {"name": "Mesa 2", "entity_id": "sensor.mesa_2"},
+    ]
+
+    await hass.services.async_call(
+        DOMAIN,
+        SERVICE_SET_ZONE_OPTIONS,
+        {"entity_id": sensor_eid, CONF_POT_SENSORS: configured},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    assert entry.options[CONF_POT_SENSORS] == configured
+    assert scheduler_of(entry).pot_sensors == configured
+    state = hass.states.get(sensor_eid)
+    assert state is not None
+    assert state.attributes[CONF_POT_SENSORS] == configured
 
 
 async def test_set_zone_options_updates_and_clears_ec_entity(

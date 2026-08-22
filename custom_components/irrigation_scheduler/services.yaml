@@ -261,3 +261,11 @@ set_zone_options:
       description: Entity id of an EC sensor for the second reservoir. Display-only. Send an empty string to clear it.
       selector:
         text:
+    pot_sensors:
+      name: Pot moisture sensors
+      description: Ordered list of compact pot/row moisture sensors shown by the card. Each item requires a name and a sensor entity_id.
+      example:
+        - name: Row 1
+          entity_id: sensor.row_1_moisture
+      selector:
+        object:

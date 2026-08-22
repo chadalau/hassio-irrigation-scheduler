@@ -221,6 +221,10 @@
         "ec_entity_id_2": {
           "name": "R2 EC sensor",
           "description": "Entity id of an EC sensor for the second reservoir. Display-only. Send an empty string to clear it."
+        },
+        "pot_sensors": {
+          "name": "Pot moisture sensors",
+          "description": "Ordered list of pot or row moisture sensors shown in the card's compact 24-hour grid."
         }
       }
     }

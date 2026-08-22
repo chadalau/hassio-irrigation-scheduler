@@ -221,6 +221,10 @@
         "ec_entity_id_2": {
           "name": "Sensor de EC R2",
           "description": "ID da entidade de um sensor de EC do segundo reservatório. Só exibição. Envie uma string vazia para limpar."
+        },
+        "pot_sensors": {
+          "name": "Sensores de umidade dos vasos",
+          "description": "Lista ordenada de sensores de umidade dos vasos ou fileiras exibida na grade compacta de 24 horas do card."
         }
       }
     }

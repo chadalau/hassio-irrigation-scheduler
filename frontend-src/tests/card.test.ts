@@ -65,6 +65,112 @@ afterEach(() => {
   }
 });
 
+describe("IrrigationScheduleCard pot sensor grid", () => {
+  const moisture = (id: string, state: string): HassEntity => ({
+    entity_id: id,
+    state,
+    last_changed: "2026-08-22T10:00:00Z",
+    last_updated: "2026-08-22T10:00:00Z",
+    attributes: { unit_of_measurement: "%" },
+  });
+
+  it("renders configured sensors as compact tiles in their stored order", async () => {
+    const configured = Array.from({ length: 6 }, (_, index) => ({
+      name: `Fileira ${index + 1}`,
+      entity_id: `sensor.fileira_${index + 1}`,
+    }));
+    const states: Record<string, HassEntity> = {
+      "sensor.jardim_next_run": baseSensor({ pot_sensors: configured }),
+    };
+    configured.forEach((sensor, index) => {
+      states[sensor.entity_id] = moisture(sensor.entity_id, String(41 + index));
+    });
+
+    const card = await mountCard(states, []);
+    const tiles = card.shadowRoot?.querySelectorAll(".pot-sensor-tile") ?? [];
+    expect(tiles).toHaveLength(6);
+    expect(tiles[0].textContent).toContain("Fileira 1");
+    expect(tiles[0].textContent).toContain("41%");
+    expect(tiles[5].textContent).toContain("Fileira 6");
+  });
+
+  it("loads and draws the native Home Assistant history for the last 24 hours", async () => {
+    const configured = [{ name: "Mesa 1", entity_id: "sensor.mesa_1" }];
+    const callWSMock = vi.fn<(message: Record<string, unknown>) => void>();
+    const callWS: NonNullable<HomeAssistant["callWS"]> = async <T>(message: Record<string, unknown>) => {
+      callWSMock(message);
+      return {
+        "sensor.mesa_1": [{ s: "30" }, { s: "48" }, { s: "35" }],
+      } as T;
+    };
+    const card = makeCard();
+    card.hass = {
+      ...makeHass(
+        {
+          "sensor.jardim_next_run": baseSensor({ pot_sensors: configured }),
+          "sensor.mesa_1": moisture("sensor.mesa_1", "35"),
+        },
+        [],
+      ),
+      callWS,
+    };
+    card.setConfig({ ...VALID_CONFIG });
+    document.body.appendChild(card);
+    attachedCards.push(card);
+    await card.updateComplete;
+    await vi.waitFor(() => expect(callWSMock).toHaveBeenCalledOnce());
+    await card.updateComplete;
+
+    expect(callWSMock.mock.calls[0][0]).toMatchObject({
+      type: "history/history_during_period",
+      entity_ids: ["sensor.mesa_1"],
+      minimal_response: true,
+    });
+    expect(card.shadowRoot?.querySelector(".pot-sensor-tile path")?.getAttribute("d"))
+      .toContain("L");
+  });
+
+  it("saves names and entities configured through the modern settings section", async () => {
+    const calls: ServiceCallRecord[] = [];
+    const states = {
+      "sensor.jardim_next_run": baseSensor({ pot_sensors: [] }),
+      "sensor.fileira_umidade": moisture("sensor.fileira_umidade", "52"),
+    };
+    const card = await mountCard(states, calls);
+    (card.shadowRoot?.querySelector(
+      'button.icon-button[title="Configurar vazão e vasos"]',
+    ) as HTMLButtonElement).click();
+    await card.updateComplete;
+    const potNav = Array.from(
+      card.shadowRoot?.querySelectorAll<HTMLButtonElement>(".settings-nav button") ?? [],
+    ).find((button) => button.textContent?.includes("Sensores dos vasos"));
+    potNav?.click();
+    await card.updateComplete;
+    (card.shadowRoot?.querySelector(".pot-settings-toolbar button") as HTMLButtonElement).click();
+    await card.updateComplete;
+
+    const name = card.shadowRoot?.querySelector(
+      ".pot-settings-row input",
+    ) as HTMLInputElement;
+    name.value = "Mesa central";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    await card.updateComplete;
+    const entity = card.shadowRoot?.querySelector(
+      ".pot-settings-row select",
+    ) as HTMLSelectElement;
+    entity.value = "sensor.fileira_umidade";
+    entity.dispatchEvent(new Event("change", { bubbles: true }));
+    await card.updateComplete;
+    (card.shadowRoot?.querySelector(".settings-dialog .dialog-save") as HTMLButtonElement).click();
+    await card.updateComplete;
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].data).toEqual({
+      pot_sensors: [{ name: "Mesa central", entity_id: "sensor.fileira_umidade" }],
+    });
+  });
+});
+
 describe("validateCardConfig", () => {
   it("throws for non-object config", () => {
     expect(() => validateCardConfig(null)).toThrow(
@@ -265,12 +371,22 @@ describe("IrrigationScheduleCard settings panel pH gate", () => {
     return cog;
   }
 
+  async function openReservoirOne(card: IrrigationScheduleCard): Promise<void> {
+    const button = Array.from(
+      card.shadowRoot?.querySelectorAll<HTMLButtonElement>(".settings-nav button") ?? [],
+    ).find((item) => item.textContent?.includes("Reservatório 1"));
+    expect(button).toBeDefined();
+    button?.click();
+    await card.updateComplete;
+  }
+
   it("only sends ph_entity_id when the field was actually edited", async () => {
     const calls: ServiceCallRecord[] = [];
     const card = await mountCard({ "sensor.jardim_next_run": baseSensor() }, calls);
 
     openSettings(card);
     await card.updateComplete;
+    await openReservoirOne(card);
 
     const phInput = card.shadowRoot?.querySelector(
       'input[list="ph-sensor-options"]',
@@ -306,12 +422,12 @@ describe("IrrigationScheduleCard settings panel pH gate", () => {
 
     openSettings(card);
     await card.updateComplete;
+    await openReservoirOne(card);
 
     const numberInputs = card.shadowRoot?.querySelectorAll(
       '.settings-dialog .duration-row input[type="number"]',
     ) as NodeListOf<HTMLInputElement>;
-    // 4 = R1 min/max + R2 min/max; the first pair (index 0/1) is R1's.
-    expect(numberInputs).toHaveLength(4);
+    expect(numberInputs).toHaveLength(2);
     dispatchChange(numberInputs[0], "7"); // ph_min (R1)
     dispatchChange(numberInputs[1], "6"); // ph_max (R1)
     await card.updateComplete;
@@ -336,6 +452,7 @@ describe("IrrigationScheduleCard settings panel pH gate", () => {
 
     openSettings(card);
     await card.updateComplete;
+    await openReservoirOne(card);
 
     const ecInput = card.shadowRoot?.querySelector(
       'input[list="ec-sensor-options"]',

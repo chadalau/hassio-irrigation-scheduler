@@ -44,6 +44,9 @@ from .const import (
     CONF_PH_MAX_2,
     CONF_PH_MIN,
     CONF_PH_MIN_2,
+    CONF_POT_SENSOR_ENTITY_ID,
+    CONF_POT_SENSOR_NAME,
+    CONF_POT_SENSORS,
     CONF_RESERVOIR_VOLUME_L,
     CONF_SCHEDULE_DAYS,
     CONF_SCHEDULE_DURATION,
@@ -106,6 +109,39 @@ WATER_NOW_SCHEMA = vol.Schema(
 STOP_SCHEMA = vol.Schema({})
 REFILL_RESERVOIR_SCHEMA = vol.Schema({})
 
+
+def _validate_pot_sensors(value: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Normalize the ordered pot-sensor list and reject ambiguous entries."""
+    normalized: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(value):
+        name = item[CONF_POT_SENSOR_NAME].strip()
+        entity_id = item[CONF_POT_SENSOR_ENTITY_ID].strip().lower()
+        if not name:
+            raise vol.Invalid(f"Pot sensor at index {index} has an empty name")
+        if not entity_id.startswith("sensor."):
+            raise vol.Invalid(
+                f"Pot sensor at index {index} must use the sensor domain"
+            )
+        if entity_id in seen:
+            raise vol.Invalid(f"Duplicate pot sensor entity_id {entity_id!r}")
+        seen.add(entity_id)
+        normalized.append(
+            {
+                CONF_POT_SENSOR_NAME: name,
+                CONF_POT_SENSOR_ENTITY_ID: entity_id,
+            }
+        )
+    return normalized
+
+
+POT_SENSOR_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_POT_SENSOR_NAME): vol.All(cv.string, vol.Length(max=64)),
+        vol.Required(CONF_POT_SENSOR_ENTITY_ID): cv.entity_id,
+    }
+)
+
 UPDATE_SCHEDULE_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_SCHEDULE_ID): cv.string,
@@ -164,6 +200,9 @@ SET_ZONE_OPTIONS_SCHEMA = vol.Schema(
             vol.Coerce(float), vol.Range(min=PH_SCALE_MIN, max=PH_SCALE_MAX)
         ),
         vol.Optional(CONF_EC_ENTITY_ID_2): cv.string,
+        vol.Optional(CONF_POT_SENSORS): vol.All(
+            [POT_SENSOR_SCHEMA], vol.Length(max=60), _validate_pot_sensors
+        ),
     }
 )
 # ph_min <= ph_max is validated in IrrigationScheduler.async_set_zone_options
@@ -457,6 +496,7 @@ async def _async_register_services(hass: HomeAssistant) -> None:
                 ph_min_2=data.get(CONF_PH_MIN_2),
                 ph_max_2=data.get(CONF_PH_MAX_2),
                 ec_entity_id_2=data.get(CONF_EC_ENTITY_ID_2),
+                pot_sensors=data.get(CONF_POT_SENSORS),
             )
         return None
 

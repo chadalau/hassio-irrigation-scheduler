@@ -78,6 +78,9 @@ from .const import (
     CONF_PH_MAX_2,
     CONF_PH_MIN,
     CONF_PH_MIN_2,
+    CONF_POT_SENSOR_ENTITY_ID,
+    CONF_POT_SENSOR_NAME,
+    CONF_POT_SENSORS,
     CONF_RESERVOIR_ACCOUNTED_RUNS,
     CONF_RESERVOIR_REMAINING_L,
     CONF_RESERVOIR_VOLUME_L,
@@ -98,6 +101,7 @@ from .const import (
     DEFAULT_PH_MAX_2,
     DEFAULT_PH_MIN,
     DEFAULT_PH_MIN_2,
+    DEFAULT_POT_SENSORS,
     DEFAULT_RESERVOIR_VOLUME_L,
     HISTORY_MAX_ENTRIES,
     HISTORY_RETENTION_DAYS,
@@ -412,6 +416,40 @@ class IrrigationScheduler:
             DEFAULT_NUMBER_OF_POTS,
         )
         return DEFAULT_NUMBER_OF_POTS
+
+    @property
+    def pot_sensors(self) -> list[dict[str, str]]:
+        """Ordered pot moisture sensors configured for the compact card grid."""
+        value = self.entry.options.get(CONF_POT_SENSORS, DEFAULT_POT_SENSORS)
+        if not isinstance(value, list):
+            _LOGGER.warning(
+                "Invalid pot_sensors in options for %s; using an empty list",
+                self.entry.entry_id,
+            )
+            return []
+        result: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            name = item.get(CONF_POT_SENSOR_NAME)
+            entity_id = item.get(CONF_POT_SENSOR_ENTITY_ID)
+            if (
+                not isinstance(name, str)
+                or not name.strip()
+                or not isinstance(entity_id, str)
+                or not entity_id.startswith("sensor.")
+                or entity_id in seen
+            ):
+                continue
+            seen.add(entity_id)
+            result.append(
+                {
+                    CONF_POT_SENSOR_NAME: name.strip(),
+                    CONF_POT_SENSOR_ENTITY_ID: entity_id,
+                }
+            )
+        return result
 
     @property
     def reservoir_volume_l(self) -> int:
@@ -734,6 +772,7 @@ class IrrigationScheduler:
         ph_min_2: float | None = None,
         ph_max_2: float | None = None,
         ec_entity_id_2: str | None = None,
+        pot_sensors: list[dict[str, str]] | None = None,
     ) -> None:
         """Update optional zone settings (duration / flow rate / pots / reservoir / pH gate / EC).
 
@@ -803,6 +842,8 @@ class IrrigationScheduler:
             options[CONF_PH_MIN_2] = ph_min_2
         if ph_max_2 is not None:
             options[CONF_PH_MAX_2] = ph_max_2
+        if pot_sensors is not None:
+            options[CONF_POT_SENSORS] = [dict(item) for item in pot_sensors]
         # Explicitly disabling a reservoir's gate: any warning it could have
         # caused is now stale (the next scheduled fire would clear it
         # anyway, but leaving a "!" badge up after the user just turned the

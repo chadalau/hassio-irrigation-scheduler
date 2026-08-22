@@ -70,6 +70,7 @@ class IrrigationSchedulerSensor(SensorEntity):
             "max_duration": self._scheduler.max_duration,
             "flow_rate_lph": self._scheduler.flow_rate_lph,
             "number_of_pots": self._scheduler.number_of_pots,
+            "pot_sensors": self._scheduler.pot_sensors,
             "reservoir_volume_l": self._scheduler.reservoir_volume_l,
             "reservoir_remaining_l": self._scheduler.reservoir_remaining_l,
             "ph_entity_id": self._scheduler.ph_entity_id,

@@ -41,6 +41,12 @@ export interface HomeAssistant {
     serviceData?: Record<string, unknown>,
     target?: ServiceTarget,
   ): Promise<void>;
+  callWS?<T = unknown>(message: Record<string, unknown>): Promise<T>;
+}
+
+export interface PotSensorConfig {
+  name: string;
+  entity_id: string;
 }
 
 /** One irrigation schedule as exposed in the sensor attributes (contract). */
@@ -74,6 +80,7 @@ export interface NextRunAttributes extends Record<string, unknown> {
   max_duration?: number;
   flow_rate_lph?: number;
   number_of_pots?: number;
+  pot_sensors?: PotSensorConfig[];
   reservoir_volume_l?: number;
   /** Tracked remaining volume; defaults to reservoir_volume_l when absent
    * (matches the backend's "full capacity" default for a never-set zone). */

@@ -380,6 +380,104 @@ export const cardStyles = css`
     color: var(--error-color, #f44336);
   }
 
+  .pot-sensors-section {
+    padding-top: 0;
+  }
+
+  .pot-sensors-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .pot-sensors-heading .section-title {
+    margin: 0;
+  }
+
+  .pot-sensors-heading > span {
+    padding: 3px 7px;
+    border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.22));
+    border-radius: 5px;
+    color: var(--secondary-text-color);
+    font-size: 9px;
+  }
+
+  .pot-sensors-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .pot-sensor-tile {
+    position: relative;
+    min-width: 0;
+    height: 59px;
+    padding: 7px 8px 4px;
+    overflow: hidden;
+    text-align: left;
+    border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2));
+    border-radius: 7px;
+    background: rgba(127, 127, 127, 0.035);
+    color: var(--primary-text-color);
+    cursor: pointer;
+  }
+
+  .pot-sensor-tile:hover {
+    border-color: rgba(var(--scheduler-header-accent-rgb), 0.42);
+    background: rgba(var(--scheduler-header-accent-rgb), 0.055);
+  }
+
+  .pot-sensor-copy {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: flex-start;
+    gap: 5px;
+  }
+
+  .pot-sensor-copy ha-icon {
+    --mdc-icon-size: 14px;
+    margin-top: 1px;
+    color: var(--scheduler-header-accent);
+  }
+
+  .pot-sensor-copy small,
+  .pot-sensor-copy strong {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pot-sensor-copy small {
+    max-width: 75px;
+    color: var(--secondary-text-color);
+    font-size: 9px;
+  }
+
+  .pot-sensor-copy strong {
+    margin-top: 1px;
+    font-size: 11px;
+    color: var(--scheduler-header-accent);
+  }
+
+  .pot-sensor-tile svg {
+    position: absolute;
+    inset: auto 5px 3px 5px;
+    width: calc(100% - 10px);
+    height: 22px;
+    overflow: visible;
+  }
+
+  .pot-sensor-tile path {
+    fill: none;
+    stroke: var(--scheduler-header-accent);
+    stroke-width: 1.25;
+    vector-effect: non-scaling-stroke;
+    opacity: 0.72;
+  }
+
   .refill-button {
     flex-shrink: 0;
     display: inline-flex;
@@ -1148,6 +1246,511 @@ export const cardStyles = css`
     font-size: 13px;
   }
 
+  /* Modern settings workspace: the schedule/history dialogs keep the compact
+     legacy geometry above, while only the gear dialog becomes a navigable
+     two-pane editor. */
+  .settings-dialog {
+    width: min(94vw, 820px);
+    height: min(88vh, 690px);
+    max-height: 690px;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid rgba(var(--scheduler-header-accent-rgb), 0.25);
+    border-radius: 14px;
+    background: var(--card-background-color, #1c1c1c);
+  }
+
+  .settings-header {
+    flex: 0 0 auto;
+    min-height: 72px;
+    padding: 14px 18px;
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr) 36px;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid var(--divider-color, rgba(127, 127, 127, 0.18));
+    background: linear-gradient(100deg, rgba(var(--scheduler-header-accent-rgb), 0.09), transparent 48%);
+  }
+
+  .settings-header-icon {
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(var(--scheduler-header-accent-rgb), 0.55);
+    border-radius: 50%;
+    color: var(--scheduler-header-accent);
+    background: rgba(var(--scheduler-header-accent-rgb), 0.09);
+  }
+
+  .settings-header-icon ha-icon {
+    --mdc-icon-size: 22px;
+  }
+
+  .settings-header small {
+    color: var(--scheduler-header-accent);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.1px;
+  }
+
+  .settings-header h3 {
+    margin: 2px 0 0;
+    font-size: 18px;
+    line-height: 1.1;
+  }
+
+  .settings-header p {
+    margin: 3px 0 0;
+    color: var(--secondary-text-color);
+    font-size: 10px;
+  }
+
+  .settings-close {
+    justify-self: end;
+  }
+
+  .settings-layout {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+
+  .settings-nav {
+    padding: 14px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border-right: 1px solid var(--divider-color, rgba(127, 127, 127, 0.16));
+    background: rgba(0, 0, 0, 0.08);
+  }
+
+  .settings-nav button {
+    width: 100%;
+    min-height: 42px;
+    padding: 7px 9px;
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr) 16px;
+    align-items: center;
+    gap: 7px;
+    text-align: left;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--secondary-text-color);
+    cursor: pointer;
+  }
+
+  .settings-nav button > ha-icon {
+    --mdc-icon-size: 17px;
+  }
+
+  .settings-nav button span {
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .settings-nav button small {
+    display: block;
+    margin-top: 1px;
+    font-size: 8px;
+    font-weight: 400;
+  }
+
+  .settings-nav button.active {
+    border-color: rgba(var(--scheduler-header-accent-rgb), 0.26);
+    background: rgba(var(--scheduler-header-accent-rgb), 0.09);
+    color: var(--scheduler-header-accent);
+  }
+
+  .settings-nav .nav-chevron {
+    --mdc-icon-size: 14px;
+    opacity: 0;
+  }
+
+  .settings-nav button.active .nav-chevron {
+    opacity: 1;
+  }
+
+  .settings-content {
+    min-width: 0;
+    padding: 20px 22px;
+    overflow-y: auto;
+  }
+
+  .settings-section-heading {
+    margin-bottom: 16px;
+  }
+
+  .settings-section-heading h4 {
+    margin: 0;
+    font-size: 17px;
+  }
+
+  .settings-section-heading p {
+    margin: 4px 0 0;
+    color: var(--secondary-text-color);
+    font-size: 10px;
+  }
+
+  .settings-card-grid {
+    gap: 10px;
+  }
+
+  .settings-field-card {
+    min-height: 98px;
+    padding: 12px;
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-items: start;
+    gap: 6px 9px;
+    border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.19));
+    border-radius: 9px;
+    background: rgba(127, 127, 127, 0.03);
+  }
+
+  .settings-field-icon {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border-radius: 7px;
+    color: var(--scheduler-header-accent);
+    background: rgba(var(--scheduler-header-accent-rgb), 0.09);
+  }
+
+  .settings-field-icon ha-icon {
+    --mdc-icon-size: 17px;
+  }
+
+  .settings-field-copy strong,
+  .settings-field-copy small {
+    display: block;
+  }
+
+  .settings-field-copy strong {
+    font-size: 11px;
+  }
+
+  .settings-field-copy small {
+    margin-top: 2px;
+    color: var(--secondary-text-color);
+    font-size: 8px;
+    line-height: 1.3;
+  }
+
+  .settings-input-suffix {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .settings-input-suffix input {
+    width: 92px !important;
+  }
+
+  .settings-input-suffix > span {
+    color: var(--secondary-text-color);
+    font-size: 10px;
+  }
+
+  .settings-estimate {
+    margin-top: 12px;
+    padding: 11px 13px;
+    display: grid;
+    grid-template-columns: 28px 1fr 1fr;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid rgba(var(--scheduler-header-accent-rgb), 0.2);
+    border-radius: 8px;
+    background: rgba(var(--scheduler-header-accent-rgb), 0.055);
+  }
+
+  .settings-estimate > ha-icon {
+    --mdc-icon-size: 20px;
+    color: var(--scheduler-header-accent);
+  }
+
+  .settings-estimate span,
+  .settings-estimate strong {
+    display: block;
+  }
+
+  .settings-estimate span {
+    color: var(--secondary-text-color);
+    font-size: 8px;
+  }
+
+  .settings-estimate strong {
+    margin-top: 2px;
+    font-size: 11px;
+  }
+
+  .settings-notice {
+    margin-bottom: 12px;
+    padding: 9px 11px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    border-radius: 7px;
+    background: rgba(var(--scheduler-header-accent-rgb), 0.07);
+    color: var(--secondary-text-color);
+    font-size: 9px;
+  }
+
+  .settings-notice ha-icon {
+    --mdc-icon-size: 16px;
+    color: var(--scheduler-header-accent);
+  }
+
+  .reservoir-live-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .reservoir-live-grid > div {
+    min-height: 56px;
+    padding: 10px 12px;
+    display: grid;
+    grid-template-columns: 26px 1fr;
+    grid-template-rows: auto auto;
+    align-items: center;
+    border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.18));
+    border-radius: 8px;
+  }
+
+  .reservoir-live-grid ha-icon {
+    --mdc-icon-size: 18px;
+    grid-row: 1 / 3;
+    color: var(--scheduler-header-accent);
+  }
+
+  .reservoir-live-grid span {
+    color: var(--secondary-text-color);
+    font-size: 8px;
+  }
+
+  .reservoir-live-grid strong {
+    font-size: 14px;
+  }
+
+  .settings-form-card {
+    padding: 15px;
+    display: grid;
+    gap: 14px;
+    border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.18));
+    border-radius: 9px;
+    background: rgba(127, 127, 127, 0.025);
+  }
+
+  .settings-form-card .field > span {
+    color: var(--primary-text-color);
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .settings-form-card .field > span small {
+    color: var(--secondary-text-color);
+    font-weight: 400;
+  }
+
+  .settings-form-card input {
+    font-size: 13px !important;
+  }
+
+  .settings-form-card .duration-row {
+    align-items: end;
+  }
+
+  .settings-form-card .duration-part {
+    display: grid;
+    gap: 4px;
+  }
+
+  .settings-form-card .duration-part small {
+    color: var(--secondary-text-color);
+    font-size: 8px;
+  }
+
+  .range-separator {
+    padding-bottom: 9px;
+    color: var(--secondary-text-color);
+    font-size: 9px;
+  }
+
+  .pot-settings-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 9px;
+  }
+
+  .pot-settings-toolbar > span {
+    color: var(--secondary-text-color);
+    font-size: 9px;
+  }
+
+  .pot-settings-toolbar button {
+    padding: 7px 10px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid rgba(var(--scheduler-header-accent-rgb), 0.35);
+    border-radius: 6px;
+    background: rgba(var(--scheduler-header-accent-rgb), 0.08);
+    color: var(--scheduler-header-accent);
+    font-size: 10px;
+    cursor: pointer;
+  }
+
+  .pot-settings-toolbar ha-icon {
+    --mdc-icon-size: 14px;
+  }
+
+  .pot-settings-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .pot-settings-row {
+    min-height: 54px;
+    padding: 7px 8px;
+    display: grid;
+    grid-template-columns: 18px 22px minmax(90px, 0.7fr) minmax(150px, 1.3fr) auto;
+    align-items: end;
+    gap: 6px;
+    border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.18));
+    border-radius: 7px;
+    background: rgba(127, 127, 127, 0.025);
+  }
+
+  .drag-handle {
+    --mdc-icon-size: 17px;
+    align-self: center;
+    color: var(--secondary-text-color);
+    cursor: grab;
+  }
+
+  .pot-order {
+    align-self: center;
+    color: var(--scheduler-header-accent);
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .pot-settings-row label {
+    min-width: 0;
+  }
+
+  .pot-settings-row label > span {
+    display: block;
+    margin-bottom: 3px;
+    color: var(--secondary-text-color);
+    font-size: 8px;
+  }
+
+  .pot-settings-row input,
+  .pot-settings-row select {
+    width: 100%;
+    height: 31px;
+    box-sizing: border-box;
+    padding: 5px 7px;
+    border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2));
+    border-radius: 5px;
+    background: var(--input-fill-color, rgba(0, 0, 0, 0.08));
+    color: var(--primary-text-color);
+    font-size: 10px;
+    color-scheme: dark;
+  }
+
+  .pot-row-actions {
+    height: 31px;
+    display: flex;
+    align-items: center;
+  }
+
+  .pot-row-actions button {
+    width: 25px;
+    height: 27px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--secondary-text-color);
+    cursor: pointer;
+  }
+
+  .pot-row-actions button:disabled {
+    opacity: 0.25;
+  }
+
+  .pot-row-actions button.remove:hover {
+    color: var(--error-color);
+  }
+
+  .pot-row-actions ha-icon {
+    --mdc-icon-size: 15px;
+  }
+
+  .pot-settings-empty {
+    min-height: 210px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--secondary-text-color);
+  }
+
+  .pot-settings-empty ha-icon {
+    --mdc-icon-size: 34px;
+    margin-bottom: 8px;
+    color: var(--scheduler-header-accent);
+  }
+
+  .pot-settings-empty strong {
+    font-size: 12px;
+    color: var(--primary-text-color);
+  }
+
+  .pot-settings-empty span {
+    margin-top: 4px;
+    font-size: 9px;
+  }
+
+  .settings-actions {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 11px 16px;
+    align-items: center;
+    border-top: 1px solid var(--divider-color, rgba(127, 127, 127, 0.16));
+  }
+
+  .settings-actions > span {
+    margin-right: auto;
+    color: var(--secondary-text-color);
+    font-size: 9px;
+  }
+
+  .settings-actions .dialog-cancel {
+    border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.26));
+  }
+
+  .settings-actions .dialog-save {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--scheduler-header-accent);
+  }
+
+  .settings-actions .dialog-save ha-icon {
+    --mdc-icon-size: 15px;
+  }
+
   .compact .card-body {
     padding: 0 12px 12px;
   }
@@ -1203,6 +1806,53 @@ export const cardStyles = css`
 
     .summary-stat strong {
       font-size: 18px;
+    }
+
+    .pot-sensors-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 680px) {
+    .settings-dialog {
+      width: 96vw;
+      height: 92vh;
+    }
+
+    .settings-header p,
+    .settings-nav button span,
+    .settings-nav .nav-chevron {
+      display: none;
+    }
+
+    .settings-layout {
+      grid-template-columns: 52px minmax(0, 1fr);
+    }
+
+    .settings-nav {
+      padding-inline: 6px;
+    }
+
+    .settings-nav button {
+      grid-template-columns: 1fr;
+      justify-items: center;
+      padding: 6px;
+    }
+
+    .settings-content {
+      padding: 15px 12px;
+    }
+
+    .settings-card-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .pot-settings-row {
+      grid-template-columns: 18px 20px 1fr auto;
+    }
+
+    .pot-settings-row label:nth-of-type(2) {
+      grid-column: 3 / 5;
     }
   }
 
