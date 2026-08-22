@@ -156,8 +156,8 @@ describe("IrrigationScheduleCard pot sensor grid", () => {
     name.dispatchEvent(new Event("input", { bubbles: true }));
     await card.updateComplete;
     const entity = card.shadowRoot?.querySelector(
-      ".pot-settings-row select",
-    ) as HTMLSelectElement;
+      '.pot-settings-row input[list="pot-sensor-options"]',
+    ) as HTMLInputElement;
     entity.value = "sensor.fileira_umidade";
     entity.dispatchEvent(new Event("change", { bubbles: true }));
     await card.updateComplete;
@@ -168,6 +168,36 @@ describe("IrrigationScheduleCard pot sensor grid", () => {
     expect(calls[0].data).toEqual({
       pot_sensors: [{ name: "Mesa central", entity_id: "sensor.fileira_umidade" }],
     });
+  });
+
+  it("offers a searchable sensor field with friendly-name suggestions", async () => {
+    const states = {
+      "sensor.jardim_next_run": baseSensor({
+        pot_sensors: [{ name: "Mesa 1", entity_id: "sensor.mesa_umidade" }],
+      }),
+      "sensor.mesa_umidade": moisture("sensor.mesa_umidade", "52"),
+    };
+    states["sensor.mesa_umidade"].attributes.friendly_name = "Umidade Mesa Principal";
+    const card = await mountCard(states, []);
+    (card.shadowRoot?.querySelector(
+      'button.icon-button[title="Configurar vazão e vasos"]',
+    ) as HTMLButtonElement).click();
+    await card.updateComplete;
+    const potNav = Array.from(
+      card.shadowRoot?.querySelectorAll<HTMLButtonElement>(".settings-nav button") ?? [],
+    ).find((button) => button.textContent?.includes("Sensores dos vasos"));
+    potNav?.click();
+    await card.updateComplete;
+
+    const input = card.shadowRoot?.querySelector(
+      '.pot-settings-row input[list="pot-sensor-options"]',
+    ) as HTMLInputElement;
+    const option = card.shadowRoot?.querySelector(
+      '#pot-sensor-options option[value="sensor.mesa_umidade"]',
+    ) as HTMLOptionElement;
+    expect(input.type).toBe("search");
+    expect(input.value).toBe("sensor.mesa_umidade");
+    expect(option.getAttribute("label")).toBe("Umidade Mesa Principal");
   });
 });
 

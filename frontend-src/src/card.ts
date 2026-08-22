@@ -1340,8 +1340,13 @@ export class IrrigationScheduleCard extends LitElement {
   }
 
   private _renderPotSensorSettings(sensorIds: string[]): TemplateResult {
-    const used = new Set(this._settingsPotSensors.map((sensor) => sensor.entity_id));
     return html`
+      <datalist id="pot-sensor-options">
+        ${sensorIds.map((id) => {
+          const friendlyName = this._stringAttr(this.hass?.states[id], "friendly_name");
+          return html`<option value=${id} label=${friendlyName ?? id}></option>`;
+        })}
+      </datalist>
       <div class="pot-settings-toolbar">
         <span>${this._settingsPotSensors.length} sensores configurados</span>
         <button type="button" @click=${this._addPotSensor}><ha-icon icon="mdi:plus"></ha-icon>Adicionar sensor</button>
@@ -1355,7 +1360,24 @@ export class IrrigationScheduleCard extends LitElement {
                   <ha-icon class="drag-handle" icon="mdi:drag-vertical"></ha-icon>
                   <span class="pot-order">${index + 1}</span>
                   <label><span>Nome exibido</span><input type="text" maxlength="64" .value=${sensor.name} @input=${(ev: Event) => this._updatePotSensor(index, "name", (ev.target as HTMLInputElement).value)} /></label>
-                  <label><span>Entidade</span><select @change=${(ev: Event) => this._updatePotSensor(index, "entity_id", (ev.target as HTMLSelectElement).value)}><option value="" ?selected=${!sensor.entity_id}>Selecione um sensor</option>${sensor.entity_id && !sensorIds.includes(sensor.entity_id) ? html`<option value=${sensor.entity_id} selected>${sensor.entity_id}</option>` : ""}${sensorIds.map((id) => html`<option value=${id} ?selected=${id === sensor.entity_id} ?disabled=${used.has(id) && id !== sensor.entity_id}>${id}</option>`)}</select></label>
+                  <label>
+                    <span>Entidade — digite para buscar</span>
+                    <input
+                      class="pot-entity-input"
+                      type="search"
+                      list="pot-sensor-options"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder="Digite o nome ou entity_id…"
+                      .value=${sensor.entity_id}
+                      @change=${(ev: Event) =>
+                        this._updatePotSensor(
+                          index,
+                          "entity_id",
+                          (ev.target as HTMLInputElement).value.trim(),
+                        )}
+                    />
+                  </label>
                   <div class="pot-row-actions"><button type="button" title="Mover para cima" ?disabled=${index === 0} @click=${() => this._movePotSensor(index, index - 1)}><ha-icon icon="mdi:chevron-up"></ha-icon></button><button type="button" title="Mover para baixo" ?disabled=${index === this._settingsPotSensors.length - 1} @click=${() => this._movePotSensor(index, index + 1)}><ha-icon icon="mdi:chevron-down"></ha-icon></button><button type="button" class="remove" title="Remover sensor" @click=${() => this._removePotSensor(index)}><ha-icon icon="mdi:trash-can-outline"></ha-icon></button></div>
                 </div>
               `,
@@ -1638,6 +1660,12 @@ export class IrrigationScheduleCard extends LitElement {
       if (normalized.some((item) => !item.name || !item.entity_id)) {
         this._settingsSection = "potSensors";
         this._settingsError = "Preencha o nome e a entidade de todos os sensores.";
+        return;
+      }
+      if (normalized.some((item) => !item.entity_id.startsWith("sensor."))) {
+        this._settingsSection = "potSensors";
+        this._settingsError =
+          "Escolha uma entidade de sensor válida nas sugestões da busca.";
         return;
       }
       const ids = normalized.map((item) => item.entity_id);
