@@ -42,6 +42,10 @@ export interface HomeAssistant {
     target?: ServiceTarget,
   ): Promise<void>;
   callWS?<T = unknown>(message: Record<string, unknown>): Promise<T>;
+  /** Raw websocket connection, used as a fallback when `callWS` is absent. */
+  connection?: {
+    sendMessagePromise?<T = unknown>(message: Record<string, unknown>): Promise<T>;
+  };
 }
 
 export interface PotSensorConfig {

@@ -494,13 +494,21 @@ export const cardStyles = css`
     stroke: none;
   }
 
+  /* This label is the ONLY thing that explains an empty sparkline. At 8px
+     and 0.8 opacity it was effectively invisible, so a card with no history
+     read as "broken for no reason" -- it cost a long debugging session. */
   .pot-sensor-history-state {
     position: absolute;
     right: 7px;
-    bottom: 6px;
+    bottom: 5px;
+    z-index: 1;
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: rgba(127, 127, 127, 0.14);
     color: var(--secondary-text-color);
-    font-size: 8px;
-    opacity: 0.8;
+    font-size: 10px;
+    line-height: 1.2;
+    white-space: nowrap;
   }
 
   .refill-button {

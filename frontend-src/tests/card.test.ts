@@ -1285,6 +1285,108 @@ describe("IrrigationScheduleCard last run + history dialog", () => {
   });
 });
 
+describe("IrrigationScheduleCard pot sparkline fallbacks", () => {
+  const cfg = [{ name: "Mesa 1", entity_id: "sensor.mesa_1" }];
+
+  function statesWith(value: string): Record<string, HassEntity> {
+    return {
+      "sensor.jardim_next_run": baseSensor({ pot_sensors: cfg }),
+      "sensor.mesa_1": {
+        entity_id: "sensor.mesa_1",
+        state: value,
+        last_changed: "",
+        last_updated: "",
+        attributes: { unit_of_measurement: "%" },
+      },
+    };
+  }
+
+  it("falls back to the raw connection when hass has no callWS", async () => {
+    // REGRESSION: a hass without callWS made the whole load return early,
+    // leaving every tile blank AND label-less (the idle label is empty), which
+    // is indistinguishable from a broken card.
+    const sent: Record<string, unknown>[] = [];
+    const card = makeCard();
+    card.hass = {
+      ...makeHass(statesWith("51"), []),
+      connection: {
+        sendMessagePromise: async (message: Record<string, unknown>) => {
+          sent.push(message);
+          if (message.type === "recorder/statistics_during_period") {
+            return {} as never;
+          }
+          return { "sensor.mesa_1": [{ s: "44" }, { s: "48" }, { s: "51" }] } as never;
+        },
+      },
+    };
+    card.setConfig({ ...VALID_CONFIG });
+    document.body.appendChild(card);
+    attachedCards.push(card);
+    await card.updateComplete;
+    await vi.waitFor(() =>
+      expect(card.shadowRoot?.querySelector(".pot-sensor-line")).not.toBeNull(),
+    );
+    expect(sent.map((message) => message.type)).toContain(
+      "history/history_during_period",
+    );
+  });
+
+  it("reports it instead of going silent when there is no transport at all", async () => {
+    const card = makeCard();
+    card.hass = makeHass(statesWith("51"), []);
+    card.setConfig({ ...VALID_CONFIG });
+    document.body.appendChild(card);
+    attachedCards.push(card);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await card.updateComplete;
+      await vi.waitFor(() =>
+        expect(
+          card.shadowRoot?.querySelector(".pot-sensor-history-state")?.textContent,
+        ).toContain("Coletando"),
+      );
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("draws from live samples once the recorder comes back empty", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-08-22T10:00:00Z"));
+      const card = makeCard();
+      card.hass = {
+        ...makeHass(statesWith("40"), []),
+        callWS: (async () => ({})) as never,
+      };
+      card.setConfig({ ...VALID_CONFIG });
+      document.body.appendChild(card);
+      attachedCards.push(card);
+      await card.updateComplete;
+
+      // A second sample, a minute later: enough to draw a line with no
+      // recorder history at all.
+      vi.setSystemTime(new Date("2026-08-22T10:01:30Z"));
+      card.hass = {
+        ...makeHass(statesWith("55"), []),
+        callWS: (async () => ({})) as never,
+      };
+      // Two cycles: the sample is collected in `updated()`, i.e. after the
+      // render that would draw it, so the card asks for one more pass.
+      await card.updateComplete;
+      await card.updateComplete;
+
+      expect(card.shadowRoot?.querySelector(".pot-sensor-line")).not.toBeNull();
+      expect(
+        card.shadowRoot?.querySelector(".pot-sensor-history-state")?.textContent,
+      ).toContain("desde agora");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("IrrigationScheduleCard ticker lifecycle", () => {
   function wateringStates(): Record<string, HassEntity> {
     const now = Date.now();

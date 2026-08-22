@@ -2,6 +2,7 @@ import { LitElement, html, PropertyValues, TemplateResult } from "lit";
 import { property, state } from "lit/decorators.js";
 
 import {
+  CARD_BUILD,
   DAY_MAX,
   DAY_MIN,
   DEFAULT_COMPACT,
@@ -121,11 +122,35 @@ export class IrrigationScheduleCard extends LitElement {
   private _potHistoryHours: PotHistoryHours = 24;
 
   @state()
-  private _potHistoryStatus: "idle" | "loading" | "ready" | "empty" | "error" = "idle";
+  private _potHistoryStatus:
+    | "idle"
+    | "loading"
+    | "ready"
+    | "empty"
+    | "error"
+    | "live" = "idle";
 
   private _potHistoryKey = "";
   private _potHistoryLoadedAt = 0;
   private _potHistoryRequestId = 0;
+
+  /**
+   * Samples collected from `hass.states` while the card is on screen, one per
+   * entity, newest last.
+   *
+   * Last-resort source for the sparkline: the recorder is the good source, but
+   * it can legitimately have nothing to give (sensor excluded from `recorder`,
+   * database just purged, entity created minutes ago) and it can be
+   * unreachable (no `callWS` on this `hass`, a Home Assistant build without
+   * the history websocket command). In every one of those cases the tile used
+   * to stay blank forever with no way for the card to recover on its own.
+   * Feeding it live keeps the graph appearing — from the moment the dashboard
+   * is opened rather than 24h back, which is stated in the tile's label so the
+   * two are never confused.
+   */
+  private _potLiveSamples = new Map<string, number[]>();
+
+  private _potLiveSampledAt = 0;
 
   private _draggedPotIndex: number | null = null;
 
@@ -928,11 +953,18 @@ export class IrrigationScheduleCard extends LitElement {
         ? entity.attributes.unit_of_measurement
         : "%";
     const history = this._potSensorHistory.get(config.entity_id) ?? [];
+    // The recorder is the good source; the live buffer only steps in when it
+    // gave nothing, so a tile is never blank just because the history is
+    // unavailable for this entity.
+    const live = this._potLiveSamples.get(config.entity_id) ?? [];
+    const usingLive = history.length === 0 && live.length > 1;
+    const series = history.length > 0 ? history : usingLive ? live : [];
     const points =
-      history.length > 0 && Number.isFinite(value) ? [...history, value] : history;
+      series.length > 0 && Number.isFinite(value) ? [...series, value] : series;
     const path = this._sparklinePath(points);
-    const emptyLabel =
-      this._potHistoryStatus === "ready" && history.length === 0
+    const emptyLabel = usingLive
+      ? "desde agora"
+      : this._potHistoryStatus === "ready" && history.length === 0
         ? "Sem histórico"
         : {
             idle: "",
@@ -940,6 +972,7 @@ export class IrrigationScheduleCard extends LitElement {
             ready: "",
             empty: "Sem histórico",
             error: "Histórico indisponível",
+            live: "Coletando…",
           }[this._potHistoryStatus];
     return html`
       <button
@@ -963,7 +996,7 @@ export class IrrigationScheduleCard extends LitElement {
               `
             : ""}
         </svg>
-        ${!path && emptyLabel
+        ${emptyLabel
           ? html`<span class="pot-sensor-history-state">${emptyLabel}</span>`
           : ""}
       </button>
@@ -1032,9 +1065,65 @@ export class IrrigationScheduleCard extends LitElement {
     this._loadPotSensorHistory();
   }
 
+  /**
+   * Send a websocket command, whichever way this `hass` allows.
+   *
+   * `callWS` is the normal path, but it is optional on the object Lovelace
+   * hands a card, and when it was missing the whole history load returned
+   * early and left every tile blank with NO message at all (the idle label is
+   * empty by design). Falling back to the underlying connection removes that
+   * silent dead end; when neither exists the caller reports it instead of
+   * going quiet.
+   */
+  private _callWS<T>(message: Record<string, unknown>): Promise<T> | null {
+    if (this.hass?.callWS) {
+      return this.hass.callWS<T>(message);
+    }
+    const connection = this.hass?.connection;
+    const send = connection?.sendMessagePromise;
+    if (connection && send) {
+      return send.call(connection, message) as Promise<T>;
+    }
+    return null;
+  }
+
+  /** Append the current reading of each pot sensor to the live buffer. */
+  private _collectPotLiveSamples(sensors: readonly PotSensorConfig[]): void {
+    const now = Date.now();
+    // One sample a minute is plenty for a 100px sparkline and keeps the
+    // buffer meaningful over a long-lived dashboard session.
+    if (now - this._potLiveSampledAt < 60_000) {
+      return;
+    }
+    this._potLiveSampledAt = now;
+    let collected = false;
+    for (const sensor of sensors) {
+      const value = Number.parseFloat(
+        this.hass?.states[sensor.entity_id]?.state ?? "",
+      );
+      if (!Number.isFinite(value)) {
+        continue;
+      }
+      const samples = this._potLiveSamples.get(sensor.entity_id) ?? [];
+      samples.push(value);
+      this._potLiveSamples.set(sensor.entity_id, samples.slice(-96));
+      collected = true;
+    }
+    // The buffer is a plain Map read during render, and this runs FROM
+    // `updated()` -- i.e. after the render that would have drawn it. Without
+    // asking for another pass the new sample sits invisible until something
+    // else happens to re-render, which is exactly how a live-only graph would
+    // look permanently stuck. Throttled above, so this costs one extra render
+    // a minute at most.
+    if (collected) {
+      this.requestUpdate();
+    }
+  }
+
   private _loadPotSensorHistory(): void {
     const sensors = this._potSensorsAttr(this._sensorEntity);
     const ids = sensors.map((sensor) => sensor.entity_id);
+    this._collectPotLiveSamples(sensors);
     const key = `${this._potHistoryHours}:${ids.join("|")}`;
     if (key !== this._potHistoryKey) {
       this._potHistoryKey = key;
@@ -1042,11 +1131,7 @@ export class IrrigationScheduleCard extends LitElement {
       this._potSensorHistory = new Map();
       this._potHistoryStatus = "idle";
     }
-    if (
-      ids.length === 0 ||
-      !this.hass?.callWS ||
-      Date.now() - this._potHistoryLoadedAt < 5 * 60_000
-    ) {
+    if (ids.length === 0 || Date.now() - this._potHistoryLoadedAt < 5 * 60_000) {
       return;
     }
     this._potHistoryLoadedAt = Date.now();
@@ -1054,7 +1139,7 @@ export class IrrigationScheduleCard extends LitElement {
     const requestId = ++this._potHistoryRequestId;
     const end = new Date();
     const start = new Date(end.getTime() - this._potHistoryHours * 60 * 60_000);
-    const historyRequest = this.hass.callWS<Record<string, HistoryState[]>>({
+    const historyRequest = this._callWS<Record<string, HistoryState[]>>({
         type: "history/history_during_period",
         start_time: start.toISOString(),
         end_time: end.toISOString(),
@@ -1063,7 +1148,7 @@ export class IrrigationScheduleCard extends LitElement {
         no_attributes: true,
         significant_changes_only: false,
       });
-    const statisticsRequest = this.hass.callWS<Record<string, StatisticState[]>>({
+    const statisticsRequest = this._callWS<Record<string, StatisticState[]>>({
       type: "recorder/statistics_during_period",
       start_time: start.toISOString(),
       end_time: end.toISOString(),
@@ -1071,6 +1156,17 @@ export class IrrigationScheduleCard extends LitElement {
       period: "5minute",
       types: ["mean"],
     });
+    if (!historyRequest && !statisticsRequest) {
+      // No websocket transport at all: the live buffer is the only source
+      // left, and the tile says so rather than staying mysteriously blank.
+      this._potHistoryStatus = "live";
+      console.warn(
+        "[irrigation-schedule-card] sem callWS/connection neste hass; " +
+          "usando apenas amostras ao vivo para os sensores de vaso",
+      );
+      this.requestUpdate();
+      return;
+    }
     void Promise.allSettled([historyRequest, statisticsRequest])
       .then(([historyResult, statisticsResult]) => {
         if (requestId !== this._potHistoryRequestId || key !== this._potHistoryKey) {
@@ -1098,18 +1194,40 @@ export class IrrigationScheduleCard extends LitElement {
         }
         this._potSensorHistory = next;
         const hasValues = [...next.values()].some((values) => values.length > 0);
-        this._potHistoryStatus = hasValues
-          ? "ready"
-          : historyResult.status === "rejected" && statisticsResult.status === "rejected"
-            ? "error"
-            : "empty";
-        if (historyResult.status === "rejected" && statisticsResult.status === "rejected") {
-          this._potHistoryLoadedAt = Date.now() - 4.5 * 60_000;
-          console.warn(
-            "[irrigation-schedule-card] pot history unavailable",
-            historyResult.reason,
-            statisticsResult.reason,
+        const bothFailed =
+          historyResult.status === "rejected" &&
+          statisticsResult.status === "rejected";
+        this._potHistoryStatus = hasValues ? "ready" : bothFailed ? "error" : "empty";
+        // Logged on EVERY outcome, not only when both sides fail: a single
+        // rejected request used to leave no trace anywhere, so a card that
+        // silently drew nothing gave no clue which half was broken.
+        const counts = ids
+          .map((id) => `${id}=${next.get(id)?.length ?? 0}`)
+          .join(" ");
+        const describe = (result: PromiseSettledResult<unknown>) =>
+          result.status === "rejected" ? result.reason : "ok";
+        if (hasValues) {
+          console.debug(
+            "[irrigation-schedule-card] histórico dos vasos:",
+            counts,
+            "| history:",
+            describe(historyResult),
+            "| statistics:",
+            describe(statisticsResult),
           );
+        } else {
+          console.warn(
+            "[irrigation-schedule-card] sem histórico para os sensores de vaso " +
+              `(janela de ${this._potHistoryHours}h):`,
+            counts,
+            "| history:",
+            describe(historyResult),
+            "| statistics:",
+            describe(statisticsResult),
+          );
+        }
+        if (bothFailed) {
+          this._potHistoryLoadedAt = Date.now() - 4.5 * 60_000;
         }
         this.requestUpdate();
       });
@@ -2605,6 +2723,8 @@ if (!customElements.get("irrigation-schedule-card-editor")) {
     IrrigationScheduleCardEditor,
   );
 }
+
+console.info(`[irrigation-schedule-card] build ${CARD_BUILD}`);
 
 window.customCards = window.customCards || [];
 if (!window.customCards.some((card) => card.type === "irrigation-schedule-card")) {
