@@ -420,11 +420,17 @@ export const cardStyles = css`
     gap: 5px;
   }
 
+  /* Column flow instead of an absolutely positioned chart: the copy owns the
+     top of the tile and the sparkline gets exactly what is left, so the line
+     can never ride up over the name and the reading. */
   .pot-sensor-tile {
     position: relative;
     min-width: 0;
     height: 54px;
-    padding: 6px 8px 4px;
+    padding: 5px 8px 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
     overflow: hidden;
     text-align: left;
     border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.2));
@@ -443,8 +449,7 @@ export const cardStyles = css`
      the sparkline is the reason this tile exists, and stacking spent more
      than half the height on text that reads just as well side by side. */
   .pot-sensor-copy {
-    position: relative;
-    z-index: 1;
+    flex: none;
     display: flex;
     align-items: baseline;
     gap: 4px;
@@ -478,10 +483,9 @@ export const cardStyles = css`
   }
 
   .pot-sensor-tile svg {
-    position: absolute;
-    inset: auto 5px 3px 5px;
-    width: calc(100% - 10px);
-    height: 30px;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
     overflow: visible;
   }
 
