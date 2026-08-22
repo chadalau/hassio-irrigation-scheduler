@@ -1446,8 +1446,10 @@ export const cardStyles = css`
   }
 
   .settings-name-card input {
+    grid-column: 1 / -1;
     min-width: 0;
-    width: 132px;
+    width: 100%;
+    box-sizing: border-box;
     padding: 6px 8px;
     border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.25));
     border-radius: 8px;

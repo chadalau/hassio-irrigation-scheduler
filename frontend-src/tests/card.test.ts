@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { IrrigationScheduleCard, validateCardConfig } from "../src/card";
 import { DOMAIN } from "../src/const";
+import { cardStyles } from "../src/styles";
 import type { HassEntity, HistoryRun, HomeAssistant } from "../src/types";
 import type { HistoryDayGroup } from "../src/utils";
 
@@ -1332,6 +1333,12 @@ describe("IrrigationScheduleCard zone rename", () => {
     (card as unknown as { _settingsName: string })._settingsName = "  Indoor  ";
     save(card);
     expect(calls).toHaveLength(0);
+  });
+
+  it("gives the zone-name input the full second row of its settings card", () => {
+    expect(cardStyles.cssText).toMatch(
+      /\.settings-name-card input\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;[^}]*width:\s*100%;/s,
+    );
   });
 });
 
